@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Stream Deck WebHID Demo</title>
+    <style>
+        body { font-family: sans-serif; padding: 2rem; max-width: 640px; }
+        button { padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer; }
+        #log { margin-top: 1rem; background: #eee; padding: 1rem; border-radius: 4px; font-family: monospace; max-height: 10rem; overflow-y: auto; }
+        #effects { margin-top: 1.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+        #effects button { flex: 1 1 auto; }
+        #effects button.active { outline: 3px solid #333; }
+
+        #controls { margin-top: 1.25rem; display: flex; flex-direction: column; gap: 0.6rem; max-width: 420px; }
+        #controls label { display: grid; grid-template-columns: 5.5rem 1fr 3.5rem; align-items: center; gap: 0.75rem; font-size: 0.9rem; }
+        #controls input[type="range"] { width: 100%; }
+        #controls span { text-align: right; font-family: monospace; color: #555; }
+
+        #previewLabel { margin-top: 1.5rem; margin-bottom: 0.5rem; font-size: 0.85rem; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
+        .deck-shell {
+            display: inline-block;
+            background: linear-gradient(#2b2b2e, #19191b);
+            padding: 1.1rem;
+            border-radius: 14px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        .key-grid { display: grid; gap: 8px; }
+        .key-grid canvas {
+            display: block;
+            width: 64px;
+            height: 64px;
+            border-radius: 8px;
+            background: #000;
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Stream Deck WebHID Demo</h1>
+    <p>Ensure the official Elgato software is closed before connecting.</p>
+
+    <button id="connectBtn">Connect Stream Deck</button>
+
+    <div id="effects">
+        <button id="waveBtn" data-effect="wave">🌊 Wave</button>
+        <button id="rainBtn" data-effect="rain">🌧️ Rain</button>
+        <button id="soothingBtn" data-effect="soothing">🔥 Soothing</button>
+        <button id="blastBtn" data-effect="blast">💥 Blast</button>
+        <button id="stopBtn">⏹ Stop</button>
+    </div>
+
+    <div id="controls">
+        <label>Speed <input type="range" id="speedSlider" min="10" max="300" value="100"> <span id="speedVal">1.0x</span></label>
+        <label>Hue <input type="range" id="hueSlider" min="-180" max="180" value="0"> <span id="hueVal">0&deg;</span></label>
+        <label>Brightness <input type="range" id="brightnessSlider" min="10" max="150" value="100"> <span id="brightnessVal">100%</span></label>
+    </div>
+
+    <div id="log">Status: Disconnected</div>
+
+    <div id="previewLabel">Preview</div>
+    <div class="deck-shell">
+        <div id="keyGrid" class="key-grid"></div>
+    </div>
+
+    <script type="module">
+        import { requestStreamDecks } from 'https://esm.sh/@elgato-stream-deck/webhid';
+
+        const connectBtn = document.getElementById('connectBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const effectButtons = [...document.querySelectorAll('#effects button[data-effect]')];
+        const log = document.getElementById('log');
+        const keyGridEl = document.getElementById('keyGrid');
+        const speedSlider = document.getElementById('speedSlider');
+        const hueSlider = document.getElementById('hueSlider');
+        const brightnessSlider = document.getElementById('brightnessSlider');
+        const speedVal = document.getElementById('speedVal');
+        const hueVal = document.getElementById('hueVal');
+        const brightnessVal = document.getElementById('brightnessVal');
+
+        function appendLog(msg) {
+            log.innerHTML += `<br>${msg}`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        let deck = null;
+
+        // grid describes the logical layout being animated. It starts out as
+        // a generic 5x3 mock so the preview works before any device is
+        // connected, and is rebuilt to match the real hardware on connect.
+        let grid = { numCols: 5, numRows: 3, buttons: null };
+        let previewCells = []; // [{ row, col, canvas, ctx }], row-major, same order as grid.buttons
+
+        function buildPreviewGrid(numCols, numRows) {
+            keyGridEl.style.gridTemplateColumns = `repeat(${numCols}, 64px)`;
+            keyGridEl.innerHTML = '';
+            previewCells = [];
+            for (let row = 0; row < numRows; row++) {
+                for (let col = 0; col < numCols; col++) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 64;
+                    canvas.height = 64;
+                    keyGridEl.appendChild(canvas);
+                    previewCells.push({ row, col, canvas, ctx: canvas.getContext('2d') });
+                }
+            }
+        }
+
+        // ---- Effect state -------------------------------------------------
+
+        let currentEffectKey = null;
+        let loopActive = false;
+
+        // Live-adjustable knobs. Speed scales how fast effective time
+        // accumulates (see animationLoop), hue is a degree offset added on
+        // top of each effect's own hue, brightness scales lightness.
+        let speedFactor = 1;
+        let hueShift = 0;
+        let brightnessFactor = 1;
+
+        speedSlider.addEventListener('input', () => {
+            speedFactor = Number(speedSlider.value) / 100;
+            speedVal.textContent = `${speedFactor.toFixed(1)}x`;
+        });
+        hueSlider.addEventListener('input', () => {
+            hueShift = Number(hueSlider.value);
+            hueVal.textContent = `${hueShift}°`;
+        });
+        brightnessSlider.addEventListener('input', () => {
+            brightnessFactor = Number(brightnessSlider.value) / 100;
+            brightnessVal.textContent = `${brightnessSlider.value}%`;
+        });
+
+        function updateEffectButtons() {
+            for (const btn of effectButtons) {
+                btn.classList.toggle('active', btn.dataset.effect === currentEffectKey);
+            }
+        }
+
+        function setEffect(name) {
+            currentEffectKey = name;
+            updateEffectButtons();
+            if (!loopActive) animationLoop();
+        }
+
+        function stopEffect() {
+            currentEffectKey = null;
+            updateEffectButtons();
+        }
+
+        // ---- Color helpers --------------------------------------------------
+
+        function hslToRgb(h, s, l) {
+            h = ((h % 360) + 360) % 360;
+            s = Math.min(100, Math.max(0, s)) / 100;
+            l = Math.min(100, Math.max(0, l)) / 100;
+            const c = (1 - Math.abs(2 * l - 1)) * s;
+            const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+            const m = l - c / 2;
+            let [r1, g1, b1] =
+                h < 60 ? [c, x, 0] :
+                h < 120 ? [x, c, 0] :
+                h < 180 ? [0, c, x] :
+                h < 240 ? [0, x, c] :
+                h < 300 ? [x, 0, c] : [c, 0, x];
+            return [Math.round((r1 + m) * 255), Math.round((g1 + m) * 255), Math.round((b1 + m) * 255)];
+        }
+
+        // ---- Effects --------------------------------------------------------
+        // Each effect maps a continuous position on the panel (colF/rowF, in
+        // units of "keys") plus elapsed time to an HSL color. Continuity
+        // across key boundaries is what makes the whole panel read as one
+        // smooth animation rather than independently blinking tiles.
+
+        const EFFECTS = {
+            wave(colF, rowF, t, g) {
+                const speed = 0.0011, freq = 1.4;
+                const phase = (colF / g.numCols) * Math.PI * 2 * freq + rowF * 0.35 - t * speed;
+                const v = Math.sin(phase);
+                return { h: 198, s: 85, l: 32 + v * 22 };
+            },
+            rain(colF, rowF, t, g) {
+                const col = Math.floor(colF);
+                const seed = Math.abs(Math.sin(col * 12.9898 + g.numCols * 78.233)) % 1;
+                const period = 900 + seed * 1400;
+                const phase = seed * period;
+                const dropY = (((t + phase) % period) / period) * (g.numRows + 2) - 1;
+                const d = dropY - rowF; // >=0: this row is in the drop's trailing tail
+                const intensity = d >= 0 ? Math.exp(-d / 1.1) : 0;
+                return { h: 205 - intensity * 10, s: 55 + intensity * 35, l: 6 + intensity * 58 };
+            },
+            soothing(colF, rowF, t, g) {
+                const hue = 24 + 13 * Math.sin(t * 0.00022 + colF * 0.55 + rowF * 0.3);
+                const light = 32 + 16 * Math.sin(t * 0.00016 - colF * 0.32 + rowF * 0.55);
+                return { h: hue, s: 88, l: light };
+            },
+            blast(colF, rowF, t, g) {
+                const period = 1700;
+                const progress = (t % period) / period;
+                const cx = g.numCols / 2, cy = g.numRows / 2;
+                const maxDist = Math.hypot(cx, cy) * 1.25;
+                const ringRadius = progress * maxDist;
+                const dist = Math.hypot(colF - cx, rowF - cy);
+                const intensity = Math.max(0, 1 - Math.abs(dist - ringRadius) / 0.8);
+                return { h: 42, s: 20 + intensity * 70, l: 4 + intensity * 62 };
+            },
+        };
+
+        // ---- Rendering --------------------------------------------------
+        // Each key is rendered by sampling its effect on a coarse SAMPLE x
+        // SAMPLE grid, then letting the canvas's bilinear image scaling
+        // interpolate that up to the target size. That upscale is what
+        // gives the smooth, non-blocky look within a single key, and the
+        // same sampled patch is reused for both the on-page preview and the
+        // buffer sent to the real device.
+
+        const SAMPLE = 8;
+        const sampleCanvas = document.createElement('canvas');
+        sampleCanvas.width = SAMPLE;
+        sampleCanvas.height = SAMPLE;
+        const sampleCtx = sampleCanvas.getContext('2d');
+        const sampleImageData = sampleCtx.createImageData(SAMPLE, SAMPLE);
+
+        function computeKeySample(row, col, effectFn, t, g) {
+            const data = sampleImageData.data;
+            for (let sy = 0; sy < SAMPLE; sy++) {
+                for (let sx = 0; sx < SAMPLE; sx++) {
+                    const colF = col + (sx + 0.5) / SAMPLE;
+                    const rowF = row + (sy + 0.5) / SAMPLE;
+                    const { h: hue, s, l } = effectFn(colF, rowF, t, g);
+                    const light = Math.min(100, Math.max(0, l * brightnessFactor));
+                    const [r, gr, b] = hslToRgb(hue + hueShift, s, light);
+                    const idx = (sy * SAMPLE + sx) * 4;
+                    data[idx] = r; data[idx + 1] = gr; data[idx + 2] = b; data[idx + 3] = 255;
+                }
+            }
+            sampleCtx.putImageData(sampleImageData, 0, 0);
+        }
+
+        function drawSampleTo(ctx, w, h) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.clearRect(0, 0, w, h);
+            ctx.drawImage(sampleCanvas, 0, 0, SAMPLE, SAMPLE, 0, 0, w, h);
+        }
+
+        const keyCanvasCache = new Map();
+        function getHidKeyCanvas(w, h) {
+            const cacheKey = `${w}x${h}`;
+            let entry = keyCanvasCache.get(cacheKey);
+            if (!entry) {
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                entry = { canvas, ctx };
+                keyCanvasCache.set(cacheKey, entry);
+            }
+            return entry;
+        }
+
+        // ---- Main loop --------------------------------------------------
+        // Runs purely against the on-page preview, and additionally mirrors
+        // to the real device when one is connected. Self-paced: the next
+        // frame isn't requested until the current frame's HID writes have
+        // actually finished, so it never queues up faster than the device
+        // can draw.
+        //
+        // Effective time is integrated frame-by-frame (elapsed += dt *
+        // speedFactor) rather than derived from a fixed start time, so
+        // dragging the speed slider changes the rate smoothly instead of
+        // snapping the animation's phase.
+
+        async function animationLoop() {
+            loopActive = true;
+            let lastFrameTime = null;
+            let elapsed = 0;
+            while (currentEffectKey) {
+                const now = performance.now();
+                if (lastFrameTime === null) lastFrameTime = now;
+                elapsed += (now - lastFrameTime) * speedFactor;
+                lastFrameTime = now;
+                const t = elapsed;
+                const effectFn = EFFECTS[currentEffectKey];
+
+                const hidJobs = [];
+                previewCells.forEach((cell, i) => {
+                    computeKeySample(cell.row, cell.col, effectFn, t, grid);
+                    drawSampleTo(cell.ctx, cell.canvas.width, cell.canvas.height);
+
+                    const control = grid.buttons?.[i];
+                    if (deck && control) {
+                        const { width: w, height: h } = control.pixelSize;
+                        const { canvas, ctx } = getHidKeyCanvas(w, h);
+                        drawSampleTo(ctx, w, h);
+                        const buf = ctx.getImageData(0, 0, w, h).data;
+                        hidJobs.push(deck.fillKeyBuffer(control.index, buf, { format: 'rgba' }).catch((e) => console.error('fillKeyBuffer failed', e)));
+                    }
+                });
+                await Promise.all(hidJobs);
+
+                await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
+            loopActive = false;
+            for (const cell of previewCells) cell.ctx.clearRect(0, 0, cell.canvas.width, cell.canvas.height);
+            if (deck) await deck.clearPanel().catch(() => {});
+        }
+
+        // ---- Wiring --------------------------------------------------
+
+        buildPreviewGrid(grid.numCols, grid.numRows);
+
+        connectBtn.addEventListener('click', async () => {
+            try {
+                const decks = await requestStreamDecks();
+
+                if (decks.length === 0) {
+                    log.innerText = "No device selected.";
+                    return;
+                }
+
+                deck = decks[0];
+                log.innerText = `Connected to: ${deck.MODEL}`;
+                // Full hardware backlight; the Brightness slider controls
+                // perceived brightness in software so it also affects the preview.
+                await deck.setBrightness(100);
+
+                const buttons = deck.CONTROLS.filter((c) => c.type === 'button');
+                const numCols = Math.max(...buttons.map((c) => c.column)) + 1;
+                const numRows = Math.max(...buttons.map((c) => c.row)) + 1;
+                grid = { buttons, numCols, numRows };
+                buildPreviewGrid(numCols, numRows);
+                appendLog(`Grid: ${numCols}x${numRows} (${buttons.length} keys)`);
+
+                deck.on('down', (keyIndex) => {
+                    appendLog(`Button ${keyIndex} PRESSED`);
+                    if (!currentEffectKey) deck.fillKeyColor(keyIndex, 0, 100, 255);
+                });
+                deck.on('up', (keyIndex) => {
+                    appendLog(`Button ${keyIndex} RELEASED`);
+                    if (!currentEffectKey) deck.clearKey(keyIndex);
+                });
+
+            } catch (err) {
+                console.error(err);
+                log.innerText = `Error: ${err.message}`;
+            }
+        });
+
+        for (const btn of effectButtons) {
+            btn.addEventListener('click', () => setEffect(btn.dataset.effect));
+        }
+        stopBtn.addEventListener('click', () => stopEffect());
+    </script>
+</body>
+</html>
