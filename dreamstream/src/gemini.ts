@@ -179,6 +179,10 @@ export async function conjure(idea: string, opts: ConjureOptions): Promise<Scene
         responseSchema: SCENE_SCHEMA,
         temperature: attempt === 0 ? 1.15 : 0.4,
         candidateCount: 1,
+        // 2.5 Flash reasons for seconds before answering unless told not to.
+        // The schema, the contract and the repair loop are the guidance here,
+        // so that time buys nothing but waiting.
+        ...(model.includes('2.5') && model.includes('flash') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
       },
     });
 

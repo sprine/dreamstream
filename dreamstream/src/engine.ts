@@ -131,6 +131,7 @@ export class Engine {
   #ticker = new Ticker();
   #running = false;
   #paused = false;
+  #fps = 0;
 
   #k: FieldKey = { col: 0, row: 0, i: 0, cols: 5, rows: 3, rnd: 0, beat: 0, press: 0 };
 
@@ -197,6 +198,11 @@ export class Engine {
 
   get paused(): boolean {
     return this.#paused;
+  }
+
+  /** Smoothed frames per second, for anyone curious how the loop is doing. */
+  get fps(): number {
+    return this.#fps;
   }
 
   set paused(v: boolean) {
@@ -290,8 +296,10 @@ export class Engine {
     let last = performance.now();
     while (this.#running) {
       const now = performance.now();
-      const dt = Math.min(0.05, (now - last) / 1000);
+      const raw = (now - last) / 1000;
+      const dt = Math.min(0.05, raw);
       last = now;
+      if (raw > 0) this.#fps += (1 / raw - this.#fps) * 0.08;
 
       this.#wall += dt;
       if (!this.#paused) {

@@ -6,13 +6,14 @@
   <title>dreamstream</title>
   <meta name="description" content="Describe a dream. Watch it land on your Stream Deck." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%9C%A6%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://generativelanguage.googleapis.com" crossorigin />
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
   <div class="aura" aria-hidden="true"></div>
 
   <header class="bar">
-    <div class="mark">✦ dreamstream</div>
+    <div class="mark">dreamstream</div>
     <div class="grow"></div>
     <button id="deckBtn" class="chip" type="button">
       <span class="dot" id="deckDot"></span><span id="deckLabel">Connect deck</span>
@@ -29,11 +30,11 @@
       <div class="plate">
         <h1 id="dreamName">—</h1>
         <p id="dreamVibe">waking up…</p>
+        <p class="meta" id="dreamMeta"></p>
       </div>
     </section>
 
     <form class="composer" id="composer" autocomplete="off">
-      <span class="spark" aria-hidden="true">✦</span>
       <input id="prompt" type="text" placeholder="describe a dream, or an app to control…" aria-label="Describe a dream or an app to control" maxlength="240" />
       <button id="remixBtn" class="ghost" type="button" title="Evolve what is playing (⌘⏎)">Remix</button>
       <button id="conjureBtn" class="go" type="submit">Conjure</button>
@@ -60,11 +61,19 @@
         <input id="glow" type="range" min="10" max="150" value="100" />
         <output id="glowOut">100%</output>
       </label>
-      <button id="keepBtn" class="chip" type="button" title="Keep this dream (⌘S)">♥ Keep</button>
+      <button id="keepBtn" class="chip" type="button" title="Keep this dream (⌘S)">Keep</button>
     </section>
 
     <section class="shelf" id="shelf" aria-label="Kept dreams"></section>
   </main>
+
+  <footer class="hints" aria-hidden="true">
+    <span><kbd>/</kbd>prompt</span>
+    <span><kbd>⏎</kbd>conjure</span>
+    <span><kbd>⌘⏎</kbd>remix</span>
+    <span><kbd>⌘S</kbd>keep</span>
+    <span><kbd>space</kbd>pause</span>
+  </footer>
 
   <dialog id="settingsDlg" class="sheet">
     <form method="dialog">

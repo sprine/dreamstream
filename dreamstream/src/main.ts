@@ -16,6 +16,7 @@ const ui = {
   keys: $<HTMLDivElement>('keys'),
   name: $<HTMLHeadingElement>('dreamName'),
   vibe: $<HTMLParagraphElement>('dreamVibe'),
+  meta: $<HTMLParagraphElement>('dreamMeta'),
   composer: $<HTMLFormElement>('composer'),
   prompt: $<HTMLInputElement>('prompt'),
   conjure: $<HTMLButtonElement>('conjureBtn'),
@@ -88,6 +89,15 @@ function wear({ dream, layout }: Scene): void {
   ui.name.style.animation = '';
 }
 
+/** The quiet readout under the name: grid, tempo, and how the loop is doing. */
+function paintMeta(): void {
+  if (!scene) return;
+  const { cols, rows } = engine.grid;
+  const fps = Math.round(engine.fps);
+  ui.meta.textContent = `${cols}×${rows} · ${scene.dream.bpm} bpm${fps ? ` · ${fps} fps` : ''}`;
+}
+setInterval(paintMeta, 1000);
+
 /** Serialisable form: a dream, plus a layout when it is wearing one. */
 const flatten = (s: Scene): SceneSpec =>
   s.layout ? { ...serialise(s.dream), layout: s.layout } : serialise(s.dream);
@@ -97,6 +107,7 @@ async function show(next: Scene, opts: { fade?: boolean } = {}): Promise<void> {
   engine.play(next.dream, opts);
   engine.setOverlays(next.layout ? await renderKeys(next.layout) : []);
   wear(next);
+  paintMeta();
   labelKeys(next);
   store.last.set(flatten(next));
   paintShelf();
