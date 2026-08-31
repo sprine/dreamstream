@@ -111,6 +111,8 @@ button { font: inherit; cursor: pointer; }
 .chip:active, .ghost:active { transform: scale(.96); }
 .chip.icon { padding: .42rem .6rem; }
 .chip.on { color: var(--text); background: #ffffff14; border-color: color-mix(in oklab, var(--c1) 55%, transparent); }
+.chip:disabled { opacity: .4; cursor: not-allowed; }
+.chip:disabled:hover { color: var(--muted); background: #ffffff0a; border-color: var(--line); }
 .ghost.danger:hover { background: #ff5c5c1e; border-color: #ff5c5c55; color: #ffb4b4; }
 
 .dot {
@@ -210,10 +212,19 @@ main {
 .key:hover { transform: translateY(-1px); }
 .key:active { transform: scale(.93); }
 
+/* Edit mode: keys read as editable fields, not just buttons to press. */
+.keys.editing .key {
+  box-shadow: inset 0 0 0 1px #ffffff10, 0 1px 2px #0009, 0 0 0 2px transparent;
+  transition: box-shadow .15s, transform .1s var(--spring);
+}
+.keys.editing .key:hover {
+  box-shadow: inset 0 0 0 1px #ffffff10, 0 1px 2px #0009, 0 0 0 2px color-mix(in oklab, var(--c1) 70%, white);
+}
+
 .plate { text-align: center; }
 .plate h1 {
   margin: 0;
-  font-size: 1.55rem;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
   font-weight: 650;
   letter-spacing: -.025em;
   color: var(--text);
@@ -256,7 +267,7 @@ main {
   background: none;
   color: var(--text);
   font: inherit;
-  font-size: .98rem;
+  font-size: 1.4rem;
   padding: .5rem 0;
 }
 .composer input::placeholder { color: var(--faint); }
@@ -425,6 +436,79 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); cursor: 
   overflow-x: auto;
 }
 .err { margin: -.5rem 0 0; min-height: 1rem; font-size: .76rem; color: #ff9f9f; font-family: var(--mono); }
+
+/* --- key editor (direct-manipulation popover) -------------------------- */
+
+.key-editor {
+  position: fixed;
+  z-index: 40;
+  width: min(300px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--ink-2);
+  color: var(--text);
+  padding: .9rem 1rem 1rem;
+  box-shadow: 0 30px 70px -20px #000c, inset 0 1px 0 #ffffff0c;
+  animation: pop .16s var(--spring);
+}
+.ke-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .7rem; }
+.ke-title { font-weight: 600; font-size: .85rem; letter-spacing: -.01em; }
+.ke-close { all: unset; cursor: pointer; color: var(--muted); font-size: 1.1rem; line-height: 1; padding: .1rem .3rem; }
+.ke-close:hover { color: var(--text); }
+
+.ke-field { display: flex; flex-direction: column; gap: .3rem; margin-bottom: .65rem; font-size: .72rem; color: var(--muted); }
+.ke-field input[type=text] {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #00000047;
+  color: var(--text);
+  font: inherit;
+  font-size: .82rem;
+  padding: .4rem .55rem;
+  outline: none;
+}
+.ke-field input[type=text]:focus { border-color: color-mix(in oklab, var(--c1) 55%, #ffffff30); }
+.ke-search { margin-bottom: .4rem; }
+
+.ke-accent-row { flex-direction: row; align-items: center; gap: .55rem; }
+.ke-accent { width: 26px; height: 26px; border: 0; border-radius: 6px; padding: 0; background: none; cursor: pointer; }
+.ke-accent-row .ghost { font-size: .72rem; padding: .3rem .6rem; margin-left: auto; }
+
+.ke-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+  max-height: 168px;
+  overflow-y: auto;
+  padding: .4rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #00000030;
+}
+.ke-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: #ffffff08;
+  color: var(--muted);
+  font-size: .6rem;
+  transition: background .1s, border-color .1s;
+}
+.ke-icon:hover { background: #ffffff18; }
+.ke-icon[hidden] { display: none; }
+.ke-icon.on { border-color: var(--c1); background: color-mix(in oklab, var(--c1) 30%, #ffffff10); }
+.ke-icon img { width: 18px; height: 18px; display: block; }
+.ke-blank { font-size: .7rem; }
+
+.ke-foot { display: flex; justify-content: flex-end; margin-top: .2rem; }
+.ke-foot .ghost { font-size: .78rem; }
 
 @media (prefers-reduced-motion: reduce) {
   .aura, .shell::before, .dot.live { animation: none; }

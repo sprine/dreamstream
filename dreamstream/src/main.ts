@@ -5,6 +5,8 @@ import { conjure, listFlashModels } from './gemini';
 import { Deck } from './deck';
 import { Engine } from './engine';
 import { store, DEFAULT_MODEL, type Knobs } from './store';
+import { BLANK } from './icons';
+import { openKeyEditor, closeKeyEditor, type KeyPatch } from './keyEditor';
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
@@ -26,6 +28,7 @@ const ui = {
   shelf: $<HTMLElement>('shelf'),
   keep: $<HTMLButtonElement>('keepBtn'),
   play: $<HTMLButtonElement>('playBtn'),
+  editBtn: $<HTMLButtonElement>('editBtn'),
   deckBtn: $<HTMLButtonElement>('deckBtn'),
   deckDot: $<HTMLSpanElement>('deckDot'),
   deckLabel: $<HTMLSpanElement>('deckLabel'),
@@ -59,6 +62,8 @@ let shelf: SceneSpec[] = store.shelf.get();
 let conjuring: Dream | null = null;
 /** What is playing, including anything worn on the keys. */
 let scene: Scene | null = null;
+/** Clicking a key opens its editor instead of rippling it. */
+let editMode = false;
 
 const engine = new Engine({
   mount: ui.keys,
@@ -103,6 +108,7 @@ const flatten = (s: Scene): SceneSpec =>
   s.layout ? { ...serialise(s.dream), layout: s.layout } : serialise(s.dream);
 
 async function show(next: Scene, opts: { fade?: boolean } = {}): Promise<void> {
+  closeKeyEditor();
   scene = next;
   engine.play(next.dream, opts);
   engine.setOverlays(next.layout ? await renderKeys(next.layout) : []);
@@ -111,6 +117,54 @@ async function show(next: Scene, opts: { fade?: boolean } = {}): Promise<void> {
   labelKeys(next);
   store.last.set(flatten(next));
   paintShelf();
+  syncEditAvailability();
+}
+
+// --- key editing -------------------------------------------------------
+
+function syncEditAvailability(): void {
+  const has = !!scene?.layout;
+  ui.editBtn.disabled = !has;
+  ui.editBtn.title = has
+    ? 'Click a key to edit its icon, label and glyph'
+    : 'Ask for an app or a set of controls to get keys you can edit';
+  if (!has && editMode) setEditMode(false);
+}
+
+function setEditMode(on: boolean): void {
+  editMode = on;
+  ui.editBtn.classList.toggle('on', on);
+  ui.keys.classList.toggle('editing', on);
+  if (!on) closeKeyEditor();
+}
+
+/** Re-rasterises whatever is worn and persists the edit, same as any other scene change. */
+async function refreshLayoutRender(): Promise<void> {
+  const target = scene;
+  if (!target?.layout) return;
+  const overlays = await renderKeys(target.layout);
+  if (scene !== target) return; // a different scene landed while overlays were rendering
+  engine.setOverlays(overlays);
+  labelKeys(target);
+  store.last.set(flatten(target));
+}
+
+function applyKeyPatch(index: number, patch: KeyPatch): void {
+  const key = scene?.layout?.keys[index];
+  if (!key) return;
+  if (patch.icon !== undefined) key.icon = patch.icon;
+  if ('label' in patch) { if (patch.label) key.label = patch.label; else delete key.label; }
+  if ('badge' in patch) { if (patch.badge) key.badge = patch.badge; else delete key.badge; }
+  if ('accent' in patch) { if (patch.accent) key.accent = patch.accent; else delete key.accent; }
+  if ('note' in patch) { if (patch.note) key.note = patch.note; else delete key.note; }
+  void refreshLayoutRender();
+}
+
+function clearKey(index: number): void {
+  if (!scene?.layout?.keys[index]) return;
+  scene.layout.keys[index] = { icon: BLANK };
+  void refreshLayoutRender();
+  closeKeyEditor();
 }
 
 /** Hovering a key should say what it is for; the glyph alone cannot. */
@@ -399,6 +453,7 @@ $('settingsBtn').addEventListener('click', () => {
   ui.settingsDlg.showModal();
 });
 $('contractBtn').addEventListener('click', openContract);
+ui.editBtn.addEventListener('click', () => setEditMode(!editMode));
 $('applyField').addEventListener('click', () => void applyField());
 $('copyDream').addEventListener('click', () => {
   if (!scene) return;
@@ -423,11 +478,25 @@ ui.play.addEventListener('click', () => {
 
 for (const slider of Object.values(ui.sliders)) slider.addEventListener('input', () => applyKnobs());
 
-// Clicking a preview key ripples exactly as pressing the real one does.
+// Clicking a preview key ripples exactly as pressing the real one does —
+// unless edit mode is on, in which case it opens that key's editor instead.
 ui.keys.addEventListener('pointerdown', (e) => {
   const target = e.target as HTMLElement;
   const index = Number(target.dataset['index']);
-  if (Number.isFinite(index)) engine.ripple(index % engine.grid.cols, Math.floor(index / engine.grid.cols));
+  if (!Number.isFinite(index)) return;
+  const key = editMode ? scene?.layout?.keys[index] : undefined;
+  if (key) {
+    openKeyEditor(target, index, key, {
+      onChange: (patch) => applyKeyPatch(index, patch),
+      onClear: () => clearKey(index),
+    });
+    return;
+  }
+  engine.ripple(index % engine.grid.cols, Math.floor(index / engine.grid.cols));
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && editMode) setEditMode(false);
 });
 
 document.addEventListener('keydown', (e) => {
