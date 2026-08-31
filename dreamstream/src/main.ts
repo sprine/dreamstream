@@ -4,7 +4,7 @@ import { IDLE, CONJURING, STARTERS, SEEDS } from './dreams';
 import { conjure, listFlashModels } from './gemini';
 import { Deck } from './deck';
 import { Engine } from './engine';
-import { store, DEFAULT_MODEL, type Knobs } from './store';
+import { store, DEFAULT_MODEL, type Knobs, type Reminder } from './store';
 import { BLANK } from './icons';
 import { openKeyEditor, closeKeyEditor, type KeyPatch } from './keyEditor';
 
@@ -34,6 +34,16 @@ const ui = {
   deckLabel: $<HTMLSpanElement>('deckLabel'),
   settingsDlg: $<HTMLDialogElement>('settingsDlg'),
   contractDlg: $<HTMLDialogElement>('contractDlg'),
+  reminderBtn: $<HTMLButtonElement>('reminderBtn'),
+  reminderDlg: $<HTMLDialogElement>('reminderDlg'),
+  reminderForm: $<HTMLFormElement>('reminderForm'),
+  reminderFor: $<HTMLInputElement>('reminderFor'),
+  reminderLabel: $<HTMLInputElement>('reminderLabel'),
+  reminderErr: $<HTMLParagraphElement>('reminderErr'),
+  reminderLede: $<HTMLParagraphElement>('reminderLede'),
+  reminderStart: $<HTMLButtonElement>('reminderStart'),
+  reminderCancel: $<HTMLButtonElement>('reminderCancel'),
+  reminderClose: $<HTMLButtonElement>('reminderClose'),
   apiKey: $<HTMLInputElement>('apiKey'),
   model: $<HTMLInputElement>('model'),
   modelList: $<HTMLDataListElement>('modelList'),
@@ -64,6 +74,19 @@ let conjuring: Dream | null = null;
 let scene: Scene | null = null;
 /** Clicking a key opens its editor instead of rippling it. */
 let editMode = false;
+let reminder: Reminder | null = store.reminder.get();
+/** Quarter-marks already rippled, so a reload mid-countdown does not replay them. */
+const reminderMarks = new Set<number>();
+/** Fraction-of-time-remaining marks that ripple the panel on the way down. Zero itself fires the reminder. */
+const REMINDER_MARKS = [0.75, 0.5, 0.25] as const;
+// Backfilled synchronously, here, rather than inside async boot() — boot() awaits several
+// things before it would reach this, and the 1s tick interval (armed further below, but still
+// this same synchronous pass) must never get a chance to run first and replay marks that
+// already passed before this reload.
+if (reminder && reminder.endAt > Date.now()) {
+  const fraction = (reminder.endAt - Date.now()) / (reminder.minutes * 60_000);
+  for (const mark of REMINDER_MARKS) if (fraction <= mark) reminderMarks.add(mark);
+}
 
 const engine = new Engine({
   mount: ui.keys,
@@ -94,14 +117,22 @@ function wear({ dream, layout }: Scene): void {
   ui.name.style.animation = '';
 }
 
-/** The quiet readout under the name: grid, tempo, and how the loop is doing. */
+/** The quiet readout under the name: grid, tempo, how the loop is doing, and any reminder running. */
 function paintMeta(): void {
   if (!scene) return;
   const { cols, rows } = engine.grid;
   const fps = Math.round(engine.fps);
-  ui.meta.textContent = `${cols}×${rows} · ${scene.dream.bpm} bpm${fps ? ` · ${fps} fps` : ''}`;
+  let text = `${cols}×${rows} · ${scene.dream.bpm} bpm${fps ? ` · ${fps} fps` : ''}`;
+  if (reminder) text += ` · ${reminder.label ? `${reminder.label}: ` : ''}${formatRemaining(reminder.endAt - Date.now())}`;
+  ui.meta.textContent = text;
 }
-setInterval(paintMeta, 1000);
+setInterval(() => {
+  paintMeta();
+  tickReminder();
+  if (reminder && ui.reminderDlg.open) {
+    ui.reminderLede.textContent = `Running — ${formatRemaining(reminder.endAt - Date.now())}.`;
+  }
+}, 1000);
 
 /** Serialisable form: a dream, plus a layout when it is wearing one. */
 const flatten = (s: Scene): SceneSpec =>
@@ -390,6 +421,163 @@ function applyKnobs(persist = true): void {
   if (persist) store.knobs.set(k);
 }
 
+// --- reminder ----------------------------------------------------------
+
+/** Longer than this and "reminder" is the wrong word for it. */
+const REMINDER_MAX_MINUTES = 60 * 24 * 7 * 4;
+
+const DURATION_UNITS: Record<string, number> = {
+  s: 1 / 60, sec: 1 / 60, secs: 1 / 60,
+  m: 1, min: 1, mins: 1,
+  h: 60, hr: 60, hrs: 60,
+  w: 60 * 24 * 7, week: 60 * 24 * 7, weeks: 60 * 24 * 7,
+};
+
+/** "90s", "25m", "3h", "2w" — one number, one unit, minutes as the grain underneath. */
+function parseDuration(raw: string): number {
+  const m = raw.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*([a-z]*)$/);
+  if (!m) throw new Error('write it like 90s, 25m, 3h or 2w');
+  const amount = Number(m[1]);
+  const unit = m[2] || 'm';
+  const perMinute = DURATION_UNITS[unit];
+  if (perMinute === undefined) throw new Error(`unknown unit "${unit}" — try s, m, h or w`);
+  const minutes = amount * perMinute;
+  if (!(minutes > 0)) throw new Error('must be greater than zero');
+  if (minutes > REMINDER_MAX_MINUTES) throw new Error('longer than 4 weeks is not supported');
+  return minutes;
+}
+
+function formatRemaining(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const d = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (d) return `${d}d ${h}h left`;
+  if (h) return `${h}h ${m}m left`;
+  if (m) return `${m}m ${s}s left`;
+  return `${s}s left`;
+}
+
+/**
+ * Created on a real click (startReminder), not from the timer that fires later —
+ * autoplay policy can permanently suspend a context that was never touched by a gesture.
+ */
+let audioCtx: AudioContext | null = null;
+
+function primeAudio(): void {
+  try {
+    audioCtx ??= new AudioContext();
+    if (audioCtx.state === 'suspended') void audioCtx.resume();
+  } catch {
+    /* no audio output — the panel-wide ripple still lands */
+  }
+}
+
+function beep(): void {
+  try {
+    primeAudio();
+    const ctx = audioCtx;
+    if (!ctx) return;
+    if (ctx.state === 'suspended') void ctx.resume();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.42);
+  } catch {
+    /* no audio output — the panel-wide ripple still lands */
+  }
+}
+
+/** Runs once a second: rewrites the countdown, ripples at the quarter-marks, fires at zero. */
+function tickReminder(): void {
+  if (!reminder) return;
+  const remainingMs = reminder.endAt - Date.now();
+  if (remainingMs <= 0) {
+    fireReminder(reminder);
+    return;
+  }
+  const fraction = remainingMs / (reminder.minutes * 60_000);
+  const { cols, rows } = engine.grid;
+  for (const mark of REMINDER_MARKS) {
+    if (fraction <= mark && !reminderMarks.has(mark)) {
+      reminderMarks.add(mark);
+      engine.ripple((cols / 2) | 0, (rows / 2) | 0);
+    }
+  }
+}
+
+function fireReminder(r: Reminder): void {
+  reminder = null;
+  reminderMarks.clear();
+  store.reminder.set(null);
+  paintReminderControls();
+
+  // One ripple per key would blow past the engine's 24-ripple cap on any larger grid;
+  // a few origins each throw an expanding ring, which covers the whole panel regardless of its size.
+  const { cols, rows } = engine.grid;
+  const origins: [number, number][] = [
+    [0, 0], [cols - 1, 0], [0, rows - 1], [cols - 1, rows - 1], [(cols / 2) | 0, (rows / 2) | 0],
+  ];
+  for (const [col, row] of origins) engine.ripple(col, row);
+  beep();
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    new Notification(r.label || 'Reminder', { body: "Time's up." });
+  }
+  say(`⏰ ${r.label || 'Reminder'} — time's up.`);
+  paintMeta();
+}
+
+function startReminder(): void {
+  ui.reminderErr.textContent = '';
+  let minutes: number;
+  try {
+    minutes = parseDuration(ui.reminderFor.value);
+  } catch (err) {
+    ui.reminderErr.textContent = err instanceof Error ? err.message : String(err);
+    return;
+  }
+  reminder = { endAt: Date.now() + minutes * 60_000, minutes, label: ui.reminderLabel.value.trim() };
+  reminderMarks.clear();
+  store.reminder.set(reminder);
+  primeAudio(); // this click is the user gesture the beep at zero will not have
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission();
+  paintReminderControls();
+  paintMeta();
+  ui.reminderDlg.close();
+  say(`Reminder set for ${formatRemaining(minutes * 60_000)}${reminder.label ? ` — ${reminder.label}` : ''}.`);
+}
+
+function cancelReminder(): void {
+  reminder = null;
+  reminderMarks.clear();
+  store.reminder.set(null);
+  paintReminderControls();
+  paintMeta();
+  ui.reminderDlg.close();
+  say('Reminder cancelled.');
+}
+
+function paintReminderControls(): void {
+  const active = !!reminder;
+  ui.reminderBtn.classList.toggle('on', active);
+  ui.reminderCancel.hidden = !active;
+  ui.reminderStart.textContent = active ? 'Restart' : 'Start';
+  if (active && reminder) {
+    ui.reminderFor.value = String(reminder.minutes);
+    ui.reminderLabel.value = reminder.label;
+    ui.reminderLede.textContent = `Running — ${formatRemaining(reminder.endAt - Date.now())}.`;
+  } else {
+    ui.reminderErr.textContent = '';
+    ui.reminderLede.textContent = 'Set one, and the panel will pulse as it counts down.';
+  }
+}
+
 // --- contract panel --------------------------------------------------------
 
 function openContract(): void {
@@ -453,6 +641,17 @@ $('settingsBtn').addEventListener('click', () => {
   ui.settingsDlg.showModal();
 });
 $('contractBtn').addEventListener('click', openContract);
+ui.reminderBtn.addEventListener('click', () => {
+  paintReminderControls();
+  ui.reminderDlg.showModal();
+});
+// Start is the form's submit button, so this also catches Enter in either field.
+ui.reminderForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  startReminder();
+});
+ui.reminderCancel.addEventListener('click', cancelReminder);
+ui.reminderClose.addEventListener('click', () => ui.reminderDlg.close());
 ui.editBtn.addEventListener('click', () => setEditMode(!editMode));
 $('applyField').addEventListener('click', () => void applyField());
 $('copyDream').addEventListener('click', () => {
@@ -549,6 +748,13 @@ async function boot(): Promise<void> {
   paintSeeds();
   paintShelf();
   paintDeckButton();
+
+  // A reminder that finished while the tab was closed fires now, late rather than never.
+  // (Quarter-marks for one still running were already backfilled synchronously at module load.)
+  if (reminder) {
+    if (reminder.endAt <= Date.now()) fireReminder(reminder);
+    else paintReminderControls();
+  }
 
   // A deck the user already granted reopens with no dialog and no ceremony.
   await adopt(await Deck.reopen(deckHandlers).catch(() => null), false);

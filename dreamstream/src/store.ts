@@ -35,6 +35,13 @@ export interface Knobs {
 export const DEFAULT_KNOBS: Knobs = { speed: 1, hue: 0, glow: 1 };
 export const DEFAULT_MODEL = 'gemini-2.5-flash';
 
+export interface Reminder {
+  /** Absolute epoch ms — not a duration, so it is correct across reloads and multi-week waits. */
+  endAt: number;
+  minutes: number;
+  label: string;
+}
+
 export const store = {
   apiKey: {
     get: () => read<string>('apiKey', ''),
@@ -58,5 +65,10 @@ export const store = {
   last: {
     get: () => read<DreamSpec | null>('last', null),
     set: (v: DreamSpec | null) => write('last', v),
+  },
+  /** The one running reminder, if any. */
+  reminder: {
+    get: () => read<Reminder | null>('reminder', null),
+    set: (v: Reminder | null) => write('reminder', v),
   },
 };
