@@ -1,4 +1,5 @@
-import { FIELD_DOC, RESPONSE_SCHEMA, validate, type Dream } from './contract';
+import { FIELD_DOC, RESPONSE_SCHEMA, validate } from './contract';
+import { LAYOUT_SCHEMA, VOCABULARY_TEXT, validateLayout, type LayoutSpec, type Scene } from './layout';
 
 /**
  * The bridge to Gemini. Its whole job is to return a validated Dream, or to
@@ -52,7 +53,48 @@ const rain = M.pow(M.max(0, M.sin(v * 9 - t * 6 + k.rnd * 6.283)), 6) * 0.4;
 const city = M.exp(-M.pow((v - 0.86) * 5, 2)) * (0.3 + 0.7 * k.rnd);
 return [228, 46 - strike * 30, 5 + rain * 13 + city * 16 + strike * bolt * 62 + k.press * 26];
 
+WHEN TO ALSO RETURN A LAYOUT
+
+If the idea names an application, a workflow, a role, or a set of controls — a presentation remote, a streaming deck, a code review deck, a kitchen timer, a DJ rig — also return a "layout": one icon per key, row-major, exactly ${grid.cols * grid.rows} entries.
+
+If the idea is a mood, a scene, a texture or a feeling, omit "layout" entirely. A thunderstorm does not need buttons.
+
+When you do return a layout, deliberately make the field quieter: slower, lower contrast, lightness mostly under 30. The animation is now a backdrop for white glyphs and must not compete with them.
+
+THE ICON VOCABULARY
+
+Use only these names. They are real icons and they will render exactly as drawn. Do not invent names, do not describe shapes, and never write SVG.
+
+${VOCABULARY_TEXT}
+
+Use "blank" for a key that shows only the animation.
+
+LAYING OUT KEYS
+
+- ${grid.cols} x ${grid.rows} is a small space. Blank keys are structure, not waste — a wall of ${grid.cols * grid.rows} icons is unreadable. Six to ten meaningful keys is usually right.
+- Group by function and separate by role: navigation reads as a row, a destructive or live action sits away from what it could be confused with.
+- Give the primary action the strongest position and an accent colour. Use accent on two or three keys at most, or it stops meaning anything.
+- Label only when the glyph alone is ambiguous. "play" and "chevron-right" need no caption; "Blank Screen" and "Cue 3" do. Ten characters maximum.
+- A badge qualifies a glyph: "monitor" badged with "play" reads as "start presenting" more clearly than either alone.
+- Write a "note" on every non-blank key saying what it does.
+
+A GOOD LAYOUT, for a presentation remote on 5 x 3:
+
+row 1: blank | chevron-left "Prev" | presentation badge:play accent:#4DE8C2 note:"Start presenting" | chevron-right "Next" | blank
+row 2: timer "Timer" | file-text "Notes" | mouse-pointer-2 "Laser" | square "Blank" | maximize "Full"
+row 3: blank | volume-2 | mic | blank | x "Exit" accent:#FF6B6B
+
+Note what that does: the two keys you press constantly are the largest gesture in the middle row of the top band, the exit is alone in a corner, and nine of fifteen keys carry something.
+
 Answer only with the JSON object.`;
+
+/** The wire format: a Dream, optionally wearing a Layout. */
+const SCENE_SCHEMA = {
+  type: 'OBJECT',
+  properties: { ...RESPONSE_SCHEMA.properties, layout: LAYOUT_SCHEMA },
+  required: RESPONSE_SCHEMA.required,
+  propertyOrdering: [...RESPONSE_SCHEMA.propertyOrdering, 'layout'],
+};
 
 interface Part { text?: string }
 interface GeminiResponse {
@@ -99,8 +141,8 @@ export interface ConjureOptions {
   apiKey: string;
   model: string;
   grid: Grid;
-  /** An existing dream to evolve rather than replace. */
-  basis?: Dream | undefined;
+  /** An existing scene to evolve rather than replace. */
+  basis?: Scene | undefined;
   /** Called on each repair attempt, so the UI can stay honest about what is happening. */
   onRepair?: (attempt: number, problem: string) => void;
   signal?: AbortSignal | undefined;
@@ -109,17 +151,21 @@ export interface ConjureOptions {
 const MAX_REPAIRS = 2;
 
 /**
- * Turns a description into a validated Dream. If the model returns a field
- * that will not compile or will not terminate, the failure is handed back to
- * it verbatim and it gets to try again — a broken field never reaches the
- * renderer.
+ * Turns a description into a validated Scene. If the model returns a field
+ * that will not compile, or an icon that does not exist, the failure is handed
+ * back to it verbatim and it gets to try again — nothing invalid ever reaches
+ * the renderer.
  */
-export async function conjure(idea: string, opts: ConjureOptions): Promise<Dream> {
+export async function conjure(idea: string, opts: ConjureOptions): Promise<Scene> {
   const { apiKey, model, grid, basis, onRepair } = opts;
   if (!apiKey) throw new Error('Add a Gemini API key in Settings first.');
 
   const opening = basis
-    ? `Here is the dream currently playing, named "${basis.name}" (${basis.vibe}):\n\n${basis.field}\n\nEvolve it according to this note, keeping what makes it recognisable: ${idea}`
+    ? `Here is what is currently playing, named "${basis.dream.name}" (${basis.dream.vibe}):\n\n${basis.dream.field}\n\n${
+        basis.layout
+          ? `It wears the layout "${basis.layout.name}": ${basis.layout.keys.map((k) => k.icon).join(' ')}\n\n`
+          : ''
+      }Evolve it according to this note, keeping what makes it recognisable: ${idea}`
     : idea;
 
   const turns: Turn[] = [{ role: 'user', parts: [{ text: opening }] }];
@@ -131,7 +177,7 @@ export async function conjure(idea: string, opts: ConjureOptions): Promise<Dream
       contents: turns,
       generationConfig: {
         responseMimeType: 'application/json',
-        responseSchema: RESPONSE_SCHEMA,
+        responseSchema: SCENE_SCHEMA,
         temperature: attempt === 0 ? 1.15 : 0.4,
         candidateCount: 1,
       },
@@ -147,8 +193,12 @@ export async function conjure(idea: string, opts: ConjureOptions): Promise<Dream
 
     if (parsed) {
       try {
-        const dream = await validate({ ...(parsed as object), prompt: idea }, grid.cols, grid.rows);
-        return dream;
+        const raw = parsed as { layout?: unknown };
+        const dream = await validate({ ...(raw as object), prompt: idea }, grid.cols, grid.rows);
+        const layout: LayoutSpec | null = raw.layout
+          ? validateLayout(raw.layout, grid.cols * grid.rows)
+          : null;
+        return { dream, layout };
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
       }
@@ -159,11 +209,11 @@ export async function conjure(idea: string, opts: ConjureOptions): Promise<Dream
     turns.push({ role: 'model', parts: [{ text }] });
     turns.push({
       role: 'user',
-      parts: [{ text: `That field was rejected by the engine: ${lastError}\n\nFix it and return the whole Dream again. Keep the same idea and the same feel.` }],
+      parts: [{ text: `The engine rejected that: ${lastError}\n\nFix it and return the whole object again, keeping the same idea and the same feel.` }],
     });
   }
 
-  throw new Error(`Gemini could not write a working field (${lastError}). Try wording the idea differently.`);
+  throw new Error(`Gemini could not produce something valid (${lastError}). Try wording the idea differently.`);
 }
 
 interface ModelList { models?: { name?: string; supportedGenerationMethods?: string[] }[] }

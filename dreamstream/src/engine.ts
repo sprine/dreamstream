@@ -1,5 +1,5 @@
 import type { Dream, FieldKey } from './contract';
-import type { Deck } from './deck';
+import type { Deck, KeyPainter } from './deck';
 import { invalidateSamples } from './deck';
 
 /**
@@ -108,6 +108,8 @@ export class Engine {
   #primed = false;
 
   #cells: { ctx: CanvasRenderingContext2D; sx: number; sy: number }[] = [];
+  /** One transparent glyph layer per key, or empty when nothing is worn. */
+  #overlays: (HTMLCanvasElement | null)[] = [];
 
   #current: Dream | null = null;
   #previous: Dream | null = null;
@@ -215,6 +217,37 @@ export class Engine {
     this.#knobs = k;
   }
 
+  /**
+   * Puts glyphs on the keys. Pre-rendered by the layout module, because
+   * rasterising icons is not the renderer's job and doing it once per layout
+   * rather than once per frame is the difference between free and expensive.
+   */
+  setOverlays(overlays: (HTMLCanvasElement | null)[]): void {
+    this.#overlays = overlays.some(Boolean) ? overlays : [];
+  }
+
+  get wearing(): boolean {
+    return this.#overlays.length > 0;
+  }
+
+  /** Draws one key — animation, then glyph — at whatever resolution is asked for. */
+  #paintKey: KeyPainter = (index, ctx, w, h) => {
+    const col = index % this.#cols;
+    const row = (index / this.#cols) | 0;
+    ctx.clearRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(this.#low, col * S, row * S, S, S, 0, 0, w, h);
+
+    const glyph = this.#overlays[index];
+    if (!glyph) return;
+    // A pressed key's glyph swells slightly, so touch registers on the icon
+    // and not only in the animation flowing underneath it.
+    const scale = 1 + (this.#press[index] ?? 0) * 0.12;
+    const dw = w * scale;
+    const dh = h * scale;
+    ctx.drawImage(glyph, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  };
+
   attach(deck: Deck): void {
     this.#deck = deck;
     this.setGrid(deck.info.cols, deck.info.rows);
@@ -272,7 +305,7 @@ export class Engine {
 
       if (this.#deck?.alive) {
         invalidateSamples();
-        await this.#deck.paint(this.#low);
+        await this.#deck.paint(this.#low, this.#overlays.length ? this.#paintKey : null);
       }
       await this.#ticker.next();
     }
@@ -325,9 +358,7 @@ export class Engine {
     // Skipping the preview only saves work when the loop is running for a deck;
     // with no deck a hidden tab has already parked, so the first frame should land.
     if (document.hidden && this.#deck) return;
-    for (const cell of this.#cells) {
-      cell.ctx.drawImage(this.#low, cell.sx, cell.sy, S, S, 0, 0, 96, 96);
-    }
+    this.#cells.forEach((cell, i) => this.#paintKey(i, cell.ctx, 96, 96));
   }
 
   #evaluate(dream: Dream, prev: Dream | null, dt: number): void {

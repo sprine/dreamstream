@@ -8,13 +8,15 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "icons": "node scripts/build-icons.mjs"
   },
   "dependencies": {
     "@elgato-stream-deck/webhid": "^7.6.3"
   },
   "devDependencies": {
     "typescript": "^5.9.0",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "lucide-static": "^1.38.0"
   }
 }

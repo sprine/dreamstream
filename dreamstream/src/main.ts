@@ -1,4 +1,5 @@
-import { validate, serialise, compile, FIELD_DOC, CONTRACT_VERSION, type Dream, type DreamSpec } from './contract';
+import { validate, serialise, compile, FIELD_DOC, CONTRACT_VERSION, type Dream } from './contract';
+import { renderKeys, validateLayout, type Scene, type SceneSpec } from './layout';
 import { IDLE, CONJURING, STARTERS, SEEDS } from './dreams';
 import { conjure, listFlashModels } from './gemini';
 import { Deck } from './deck';
@@ -34,6 +35,7 @@ const ui = {
   modelList: $<HTMLDataListElement>('modelList'),
   modelHint: $<HTMLElement>('modelHint'),
   contractDoc: $<HTMLPreElement>('contractDoc'),
+  layoutLine: $<HTMLParagraphElement>('layoutLine'),
   fieldSrc: $<HTMLTextAreaElement>('fieldSrc'),
   fieldErr: $<HTMLParagraphElement>('fieldErr'),
   sliders: {
@@ -52,15 +54,17 @@ const ui = {
 
 let deck: Deck | null = null;
 let busy = false;
-let shelf: DreamSpec[] = store.shelf.get();
+let shelf: SceneSpec[] = store.shelf.get();
 let conjuring: Dream | null = null;
+/** What is playing, including anything worn on the keys. */
+let scene: Scene | null = null;
 
 const engine = new Engine({
   mount: ui.keys,
   onFieldError: (dream, message) => {
     say(`"${dream.name}" broke mid-flight: ${message}`, 'bad');
     // Dropping the field can leave nothing playing; the panel should never go dead.
-    if (!engine.current) void load(IDLE).then((d) => show(d, { fade: false }));
+    if (!engine.current) void load(IDLE).then((s) => show(s, { fade: false }));
   },
 });
 
@@ -71,34 +75,58 @@ function say(text: string, kind: '' | 'bad' | 'busy' = ''): void {
   ui.status.className = `status ${kind}`;
 }
 
-/** Re-themes the whole app around a dream. The transition lives in CSS. */
-function wear(dream: Dream): void {
+/** Re-themes the whole app around a scene. The transition lives in CSS. */
+function wear({ dream, layout }: Scene): void {
   const root = document.documentElement.style;
   const p = dream.palette;
   for (let i = 0; i < 4; i++) root.setProperty(`--c${i + 1}`, p[i % p.length] ?? '#7C5CFF');
-  ui.name.textContent = dream.name;
-  ui.vibe.textContent = dream.vibe;
+  ui.name.textContent = layout ? layout.name : dream.name;
+  ui.vibe.textContent = layout ? `${layout.purpose} · over ${dream.name}` : dream.vibe;
   // Restart the entrance animation so a new name arrives rather than just appearing.
   ui.name.style.animation = 'none';
   void ui.name.offsetWidth;
   ui.name.style.animation = '';
 }
 
-function show(dream: Dream, opts: { fade?: boolean } = {}): void {
-  engine.play(dream, opts);
-  wear(dream);
-  store.last.set(serialise(dream));
+/** Serialisable form: a dream, plus a layout when it is wearing one. */
+const flatten = (s: Scene): SceneSpec =>
+  s.layout ? { ...serialise(s.dream), layout: s.layout } : serialise(s.dream);
+
+async function show(next: Scene, opts: { fade?: boolean } = {}): Promise<void> {
+  scene = next;
+  engine.play(next.dream, opts);
+  engine.setOverlays(next.layout ? await renderKeys(next.layout) : []);
+  wear(next);
+  labelKeys(next);
+  store.last.set(flatten(next));
   paintShelf();
+}
+
+/** Hovering a key should say what it is for; the glyph alone cannot. */
+function labelKeys({ layout }: Scene): void {
+  [...ui.keys.children].forEach((el, i) => {
+    const key = layout?.keys[i];
+    const text = key && key.icon !== 'blank' ? [key.label, key.note].filter(Boolean).join(' — ') || key.icon : '';
+    if (text) el.setAttribute('title', text);
+    else el.removeAttribute('title');
+  });
 }
 
 // --- dream sources ---------------------------------------------------------
 
-/** Built-ins go through the same validator as anything generated. */
-async function load(spec: DreamSpec): Promise<Dream> {
-  return validate(spec, engine.grid.cols, engine.grid.rows);
+/**
+ * Turns a stored or built-in spec into something playable, against the grid
+ * that is actually connected. Built-ins go through exactly the same validation
+ * as anything Gemini writes.
+ */
+async function load(spec: SceneSpec): Promise<Scene> {
+  const { cols, rows } = engine.grid;
+  const dream = await validate(spec, cols, rows);
+  const layout = spec.layout ? validateLayout(spec.layout, cols * rows) : null;
+  return { dream, layout };
 }
 
-async function loadOrIdle(spec: DreamSpec | null): Promise<Dream> {
+async function loadOrIdle(spec: SceneSpec | null): Promise<Scene> {
   if (!spec) return load(IDLE);
   try {
     return await load(spec);
@@ -123,7 +151,7 @@ async function summon(idea: string, { remix = false } = {}): Promise<void> {
     return;
   }
 
-  const fallback = engine.current;
+  const fallback = scene;
   busy = true;
   ui.conjure.disabled = true;
   ui.remix.disabled = true;
@@ -132,18 +160,18 @@ async function summon(idea: string, { remix = false } = {}): Promise<void> {
 
   try {
     const basis = remix ? fallback : undefined;
-    const dream = await conjure(text, {
+    const next = await conjure(text, {
       apiKey,
       model: store.model.get() || DEFAULT_MODEL,
       grid: engine.grid,
       basis: basis ?? undefined,
       onRepair: (attempt) => say(attempt === 1 ? 'Almost — adjusting' : 'One more pass', 'busy'),
     });
-    show(dream);
-    say(`${dream.name} · ${dream.vibe}`);
+    await show(next);
+    say(next.layout ? `${next.layout.name} · ${next.layout.purpose}` : `${next.dream.name} · ${next.dream.vibe}`);
     ui.prompt.value = '';
   } catch (err) {
-    if (fallback) engine.play(fallback, { fade: false });
+    if (fallback) await show(fallback, { fade: false });
     say(err instanceof Error ? err.message : String(err), 'bad');
   } finally {
     busy = false;
@@ -155,18 +183,18 @@ async function summon(idea: string, { remix = false } = {}): Promise<void> {
 // --- shelf -----------------------------------------------------------------
 
 function paintShelf(): void {
-  const entries: { spec: DreamSpec; builtin: boolean }[] = [
+  const entries: { spec: SceneSpec; builtin: boolean }[] = [
     ...STARTERS.map((spec) => ({ spec, builtin: true })),
     ...shelf.map((spec) => ({ spec, builtin: false })),
   ];
-  const playing = engine.current?.field;
+  const playing = scene?.dream.field;
 
   ui.shelf.replaceChildren(
     ...entries.map(({ spec, builtin }) => {
       const card = document.createElement('button');
       card.type = 'button';
       card.className = `card${spec.field === playing ? ' on' : ''}`;
-      card.title = spec.vibe;
+      card.title = spec.layout ? `${spec.layout.name} — ${spec.layout.purpose}` : spec.vibe;
 
       const swatch = document.createElement('span');
       swatch.className = 'swatch';
@@ -175,7 +203,13 @@ function paintShelf(): void {
         i.style.background = c;
         swatch.append(i);
       }
-      card.append(swatch, document.createTextNode(spec.name));
+      card.append(swatch, document.createTextNode(spec.layout ? spec.layout.name : spec.name));
+      if (spec.layout) {
+        const tag = document.createElement('i');
+        tag.className = 'tag';
+        tag.textContent = 'keys';
+        card.append(tag);
+      }
 
       if (!builtin) {
         const x = document.createElement('button');
@@ -194,8 +228,8 @@ function paintShelf(): void {
 
       card.addEventListener('click', async () => {
         try {
-          show(await load(spec));
-          say(`${spec.name} · ${spec.vibe}`);
+          await show(await load(spec));
+          say(spec.layout ? `${spec.layout.name} · ${spec.layout.purpose}` : `${spec.name} · ${spec.vibe}`);
         } catch (err) {
           say(err instanceof Error ? err.message : 'that dream will not load', 'bad');
         }
@@ -206,16 +240,17 @@ function paintShelf(): void {
 }
 
 function keep(): void {
-  const dream = engine.current;
-  if (!dream) return;
-  if (shelf.some((s) => s.field === dream.field) || STARTERS.some((s) => s.field === dream.field)) {
-    say(`${dream.name} is already on the shelf.`);
+  if (!scene) return;
+  const spec = flatten(scene);
+  const name = scene.layout?.name ?? scene.dream.name;
+  if (shelf.some((s) => s.field === spec.field) || STARTERS.some((s) => s.field === spec.field)) {
+    say(`${name} is already on the shelf.`);
     return;
   }
-  shelf = [serialise(dream), ...shelf];
+  shelf = [spec, ...shelf];
   store.shelf.set(shelf);
   paintShelf();
-  say(`Kept ${dream.name}.`);
+  say(`Kept ${name}.`);
 }
 
 // --- device ----------------------------------------------------------------
@@ -250,9 +285,8 @@ async function adopt(d: Deck | null, announce: boolean): Promise<void> {
   deck = d;
   engine.attach(d);
   paintDeckButton();
-  // The grid may have changed shape, so the running dream is re-validated for it.
-  const spec = engine.current ? serialise(engine.current) : null;
-  show(await loadOrIdle(spec), { fade: false });
+  // The grid may have changed shape, so what is playing is re-fitted to it.
+  await show(await loadOrIdle(scene ? flatten(scene) : null), { fade: false });
   if (announce) say(`${d.info.name} · ${d.info.cols}×${d.info.rows}. Press a key.`);
 }
 
@@ -295,18 +329,25 @@ function applyKnobs(persist = true): void {
 
 function openContract(): void {
   ui.contractDoc.textContent = `Dream v${CONTRACT_VERSION}\n\n${FIELD_DOC}`;
-  ui.fieldSrc.value = engine.current?.field ?? '';
+  ui.fieldSrc.value = scene?.dream.field ?? '';
   ui.fieldErr.textContent = '';
+  const layout = scene?.layout;
+  ui.layoutLine.textContent = layout
+    ? `Wearing "${layout.name}" — ${layout.keys.filter((k) => k.icon !== 'blank').length} of ${layout.keys.length} keys carry a glyph. Copy JSON to see them.`
+    : 'No layout. Ask for an app or a set of controls and the keys get icons.';
   ui.contractDlg.showModal();
 }
 
 async function applyField(): Promise<void> {
-  const base = engine.current;
-  if (!base) return;
+  if (!scene) return;
   ui.fieldErr.textContent = '';
   try {
-    const dream = await validate({ ...serialise(base), field: ui.fieldSrc.value, prompt: 'hand-written' }, engine.grid.cols, engine.grid.rows);
-    show(dream, { fade: false });
+    const dream = await validate(
+      { ...serialise(scene.dream), field: ui.fieldSrc.value, prompt: 'hand-written' },
+      engine.grid.cols,
+      engine.grid.rows,
+    );
+    await show({ dream, layout: scene.layout }, { fade: false });
     say(`Applied your edit to ${dream.name}.`);
     ui.contractDlg.close();
   } catch (err) {
@@ -349,10 +390,9 @@ $('settingsBtn').addEventListener('click', () => {
 $('contractBtn').addEventListener('click', openContract);
 $('applyField').addEventListener('click', () => void applyField());
 $('copyDream').addEventListener('click', () => {
-  const dream = engine.current;
-  if (!dream) return;
-  void navigator.clipboard.writeText(JSON.stringify(serialise(dream), null, 2));
-  say(`Copied ${dream.name} as JSON.`);
+  if (!scene) return;
+  void navigator.clipboard.writeText(JSON.stringify(flatten(scene), null, 2));
+  say(`Copied ${scene.layout?.name ?? scene.dream.name} as JSON.`);
 });
 $('refreshModels').addEventListener('click', () => void refreshModels());
 $('forgetKey').addEventListener('click', () => {
@@ -422,8 +462,8 @@ async function boot(): Promise<void> {
   ui.sliders.glow.value = String(Math.round(knobs.glow * 100));
   applyKnobs(false);
 
-  conjuring = await load(CONJURING);
-  show(await loadOrIdle(store.last.get()), { fade: false });
+  conjuring = (await load(CONJURING)).dream;
+  await show(await loadOrIdle(store.last.get()), { fade: false });
   engine.start();
 
   paintSeeds();

@@ -25,6 +25,12 @@ export interface DeckInfo {
   panelWrite: boolean;
 }
 
+/**
+ * Draws one key at the device's own resolution. The engine supplies this; the
+ * deck decides what size to ask for and where the result goes.
+ */
+export type KeyPainter = (index: number, ctx: CanvasRenderingContext2D, w: number, h: number) => void;
+
 export interface DeckHandlers {
   onPress?: (col: number, row: number) => void;
   onRotate?: (index: number, delta: number) => void;
@@ -132,11 +138,17 @@ export class Deck {
    * Paints one frame. `low` is a canvas of exactly cols*S by rows*S pixels;
    * the browser's bilinear scaling does the smoothing on the way up, which is
    * what stops each key looking like a block of flat colour.
+   *
+   * With no `painter` the whole panel goes out as a single image, which is one
+   * HID transaction instead of fifteen. A painter means there are glyphs to
+   * composite, and those have to be drawn at each key's native resolution and
+   * placed exactly — so that path writes key by key rather than guessing where
+   * the panel image's padding puts each key.
    */
-  async paint(low: HTMLCanvasElement): Promise<void> {
+  async paint(low: HTMLCanvasElement, painter: KeyPainter | null): Promise<void> {
     if (!this.#alive) return;
     try {
-      await (this.#panel ? this.#paintPanel(low, this.#panel) : this.#paintKeys(low));
+      await (this.#panel && !painter ? this.#paintPanel(low, this.#panel) : this.#paintKeys(low, painter));
       if (this.#encoders.length && this.#frame++ % 8 === 0) await this.#paintEncoders(low);
     } catch (err) {
       this.#lost(err instanceof Error ? err.message : 'the deck stopped responding');
@@ -151,22 +163,28 @@ export class Deck {
     await this.#sd.fillPanelBuffer(pixels, { format: 'rgba', withPadding: true });
   }
 
-  /** Fallback for models without a panel write, and for keys that are lamps rather than screens. */
-  async #paintKeys(low: HTMLCanvasElement): Promise<void> {
+  /** Used when there are glyphs to place, and for models with no panel write at all. */
+  async #paintKeys(low: HTMLCanvasElement, painter: KeyPainter | null): Promise<void> {
     const cellW = low.width / this.info.cols;
     const cellH = low.height / this.info.rows;
     const jobs: Promise<void>[] = [];
 
     for (const button of this.#buttons) {
-      const sx = button.column * cellW;
-      const sy = button.row * cellH;
+      // Derived from the button's own coordinates rather than its index, so the
+      // engine's row-major grid and the hardware always agree.
+      const index = button.row * this.info.cols + button.column;
       if (isLcdButton(button)) {
         const { width: w, height: h } = button.pixelSize;
         const { ctx } = canvasOf(w, h);
-        ctx.drawImage(low, sx, sy, cellW, cellH, 0, 0, w, h);
+        if (painter) {
+          painter(index, ctx, w, h);
+        } else {
+          ctx.drawImage(low, button.column * cellW, button.row * cellH, cellW, cellH, 0, 0, w, h);
+        }
         jobs.push(this.#sd.fillKeyBuffer(button.index, ctx.getImageData(0, 0, w, h).data, { format: 'rgba' }));
       } else if (button.feedbackType === 'rgb') {
-        const [r, g, b] = samplePixel(low, sx + cellW / 2, sy + cellH / 2);
+        // A single lamp cannot show a glyph, so it takes the colour behind it.
+        const [r, g, b] = samplePixel(low, (button.column + 0.5) * cellW, (button.row + 0.5) * cellH);
         jobs.push(this.#sd.fillKeyColor(button.index, r, g, b));
       }
     }

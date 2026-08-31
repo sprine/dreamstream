@@ -34,7 +34,7 @@
 
     <form class="composer" id="composer" autocomplete="off">
       <span class="spark" aria-hidden="true">✦</span>
-      <input id="prompt" type="text" placeholder="describe a dream…" aria-label="Describe a dream" maxlength="240" />
+      <input id="prompt" type="text" placeholder="describe a dream, or an app to control…" aria-label="Describe a dream or an app to control" maxlength="240" />
       <button id="remixBtn" class="ghost" type="button" title="Evolve what is playing (⌘⏎)">Remix</button>
       <button id="conjureBtn" class="go" type="submit">Conjure</button>
     </form>
@@ -94,6 +94,7 @@
       <h2>The contract</h2>
       <p class="lede">Every dream — built in, generated, or hand-written — is this and nothing more. Edit the field and apply it; the engine cannot tell who wrote it.</p>
       <pre class="doc" id="contractDoc"></pre>
+      <p class="lede" id="layoutLine"></p>
       <label class="field">
         <span>field</span>
         <textarea id="fieldSrc" spellcheck="false" rows="14"></textarea>

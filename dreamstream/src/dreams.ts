@@ -1,4 +1,5 @@
 import type { DreamSpec } from './contract';
+import type { KeySpec, SceneSpec } from './layout';
 
 /**
  * Dreams that ship with the app. They go through the same validator as
@@ -32,7 +33,45 @@ const pulse = 0.5 + 0.5 * M.sin(t * 3.6 + k.rnd * 6.283);
 return [284 - beam * 96, 88, 4 + beam * 54 + pulse * 6];`,
 });
 
-export const STARTERS: DreamSpec[] = [
+/** Terse helper so the built-in layout reads as a grid rather than a wall of JSON. */
+const k = (icon: string, label?: string, note?: string, accent?: string, badge?: string): KeySpec => {
+  const key: KeySpec = { icon };
+  if (label) key.label = label;
+  if (note) key.note = note;
+  if (accent) key.accent = accent;
+  if (badge) key.badge = badge;
+  return key;
+};
+
+/**
+ * Ships with a layout so the icon side of the app is visible before anyone
+ * has pasted an API key. Its field is deliberately dim: glyphs come first
+ * once a layout is worn.
+ */
+export const PRESENTER: SceneSpec = {
+  ...spec({
+    name: 'Lectern',
+    vibe: 'a dark room, a lit screen',
+    palette: ['#4DE8C2', '#2B3A67', '#101830', '#FF6B6B'],
+    bpm: 30,
+    field: `const glow = M.exp(-M.pow((v - 0.32) * 2.2, 2)) * (0.5 + 0.5 * M.sin(t * 0.22 + u * 1.6));
+const floor = M.exp(-M.pow((v - 1.05) * 2.8, 2)) * 0.5;
+return [196 + glow * 20, 46, 4 + glow * 11 + floor * 7 + k.press * 30];`,
+  }),
+  layout: {
+    version: '1.0',
+    name: 'Presentation Remote',
+    purpose: 'run a talk without looking down',
+    keys: [
+      k('blank'), k('chevron-left', 'Prev', 'Previous slide'), k('presentation', '', 'Start presenting', '#4DE8C2', 'play'), k('chevron-right', 'Next', 'Next slide'), k('blank'),
+      k('timer', 'Timer', 'Start the talk timer'), k('file-text', 'Notes', 'Speaker notes'), k('mouse-pointer-2', 'Laser', 'Laser pointer'), k('square', 'Blank', 'Blank the screen'), k('maximize', 'Full', 'Full screen'),
+      k('blank'), k('volume-2', '', 'Volume'), k('mic', '', 'Microphone'), k('blank'), k('x', 'Exit', 'Leave the presentation', '#FF6B6B'),
+    ],
+  },
+};
+
+export const STARTERS: SceneSpec[] = [
+  PRESENTER,
   IDLE,
   spec({
     name: 'Ember Tide',
@@ -74,6 +113,11 @@ return [fish > 0.08 ? 26 : 178, 74, 6 + ripple * 9 + fish * 46 + k.press * 30];`
 
 /** Prompt suggestions. Shuffled on every load so the shelf never feels static. */
 export const SEEDS = [
+  'a presentation remote',
+  'a deck for reviewing pull requests',
+  'controls for a live stream',
+  'a kitchen timer and shopping list',
+  'a DJ rig',
   'a lava lamp in a submarine',
   'morse code from a friendly ship',
   'a slow thunderstorm over a city at 3am',

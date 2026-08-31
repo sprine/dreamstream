@@ -294,6 +294,17 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.35); cursor:
 .card.on { border-color: color-mix(in oklab, var(--c1) 70%, transparent); background: color-mix(in oklab, var(--c1) 16%, transparent); }
 .card .swatch { display: flex; border-radius: 5px; overflow: hidden; box-shadow: 0 0 0 1px #0006; }
 .card .swatch i { width: 7px; height: 20px; display: block; }
+.card .tag {
+  font-style: normal;
+  font-size: .6rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: .1rem .34rem;
+  border-radius: 5px;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--c4) 85%, white);
+}
 .card .x { opacity: 0; color: var(--muted); padding: 0 .15rem; border: 0; background: none; font-size: .9rem; transition: opacity .2s; }
 .card:hover .x { opacity: .7; }
 .card .x:hover { opacity: 1; color: #ff9fb0; }

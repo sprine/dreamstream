@@ -1,3 +1,11 @@
+# The Contracts
+
+There are two, and they compose. A **Dream** is the animation. A **Layout**
+is what is drawn on top of it. A dream can play alone; a layout always rides
+on one.
+
+---
+
 # The Dream Contract, v1.0
 
 Everything this app renders is a **Dream**. Gemini writes them, the built-ins
@@ -107,8 +115,90 @@ this section as the reason.**
 `eval` and `arguments` are in the denylist rather than the shadow list because
 strict mode forbids them as parameter names — they cannot be shadowed at all.
 
+---
+
+# The Layout Contract, v1.0
+
+What is drawn *on* the keys — the icons for a presentation remote, a review
+deck, a DJ rig.
+
+```jsonc
+{
+  "version": "1.0",
+  "name":    "Presentation Remote",
+  "purpose": "run a talk without looking down",
+  "keys": [                          // row-major, exactly cols * rows entries
+    { "icon": "blank" },
+    { "icon": "chevron-left",  "label": "Prev", "note": "Previous slide" },
+    { "icon": "presentation",  "badge": "play", "accent": "#4DE8C2",
+      "note": "Start presenting" },
+    // ...
+  ]
+}
+```
+
+| field | |
+|---|---|
+| `icon` | a name from the vocabulary, or `"blank"` for animation only |
+| `label` | optional caption, at most 12 characters |
+| `badge` | optional small corner glyph, for qualifying an action |
+| `accent` | optional `#rrggbb` tint for this key's glyph |
+| `note` | what the key does; shown on hover, never drawn |
+
+## Why the model does not draw
+
+**A language model asked to emit SVG path data produces shapes nobody
+recognises.** It is very good at *choosing*, and very bad at *drawing*. So it
+never draws: it picks from a closed vocabulary of 370 curated
+[Lucide](https://lucide.dev) icons, and every name it can choose is guaranteed
+to exist and guaranteed to render.
+
+Creativity lives in the composition — which icons, how they are grouped, what
+gets an accent, what stays blank, and what the animation behind them is doing.
+Recognisability is not traded away to get it.
+
+The vocabulary is defined once, in `scripts/build-icons.mjs`, and baked into
+`src/icons.json` by `npm run icons`. It is exactly the list the model is shown,
+so the prompt and the validator cannot disagree.
+
+## Resolution
+
+Names are matched in order: exact, then synonym (`next` → `chevron-right`,
+`stop` → `square`, `laser` → `mouse-pointer-2`), then singular/plural, then
+nearest spelling within two edits (`presentaton` → `presentation`). Anything
+still unresolved is collected and thrown as one error naming all of them, so
+the repair loop fixes them in a single round trip.
+
+A bad `badge` or a non-hex `accent` is decoration: it is dropped rather than
+failing the whole layout. A bad `icon` is not.
+
+## Fitting the grid
+
+`keys` is normalised to exactly `cols * rows` — padded with blanks, truncated
+if too long. Generation is always grid-aware, so this only matters when a
+stored layout moves to different hardware; moving a 5×3 layout onto a 3×2 deck
+keeps the first six keys in reading order rather than re-flowing them.
+
+## Rendering
+
+Each key is rasterised once per layout into its own transparent canvas, then
+composited over the animation every frame — one `drawImage` per key rather
+than redrawing glyphs sixty times a second. A pressed key's glyph swells
+slightly, so touch registers on the icon and not only in the ripple underneath.
+
+A soft dark scrim sits behind each glyph. Without it a white icon vanishes
+whenever the animation beneath it turns pale.
+
+Keys carrying a layout are written to the hardware individually rather than as
+one panel image: glyphs must land at each key's native resolution and exact
+position, which per-key writes give without having to guess where a padded
+panel image puts each key. Pure animations still take the single-image fast
+path.
+
+---
+
 ## Versioning
 
-`version` is stamped on every dream. Stored dreams are re-validated on load,
+`version` is stamped on every dream and every layout. Stored dreams are re-validated on load,
 so a field that a future engine rejects fails visibly at that moment rather
 than rendering something subtly wrong.

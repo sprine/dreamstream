@@ -1,6 +1,7 @@
 # dreamstream
 
-Describe an idea. Gemini writes an animation. It lands on your Stream Deck.
+Describe an idea. Gemini writes an animation and lays out the icons. It lands
+on your Stream Deck.
 
 ```
 npm install
@@ -8,7 +9,8 @@ npm run dev
 ```
 
 Then open the settings gear, paste a [Gemini API key](https://aistudio.google.com/apikey),
-and type something like *a lava lamp in a submarine*.
+and type something like *a lava lamp in a submarine* — or *a presentation
+remote*, and you get the controls for one.
 
 The key is stored in this browser's `localStorage` and is sent to Google's API
 and nowhere else. There is no server, no build step you have to think about,
@@ -16,15 +18,35 @@ and no account.
 
 ## What it does
 
-You describe a dream. Gemini answers with a [Dream](./CONTRACT.md) — a name, a
-palette, a tempo, and a small pure function that maps a position on the panel
-and a moment in time to a colour. The engine evaluates that function across the
-whole panel every frame and paints it onto the hardware.
-
-Because the animation is a *function of the whole panel* rather than fifteen
-independent icons, things flow across keys: waves travel, rain falls down
+Describe a **mood** and you get a Dream: a name, a palette, a tempo, and a
+small pure function mapping a position on the panel and a moment in time to a
+colour. The engine evaluates it across the whole panel every frame. Because
+the animation is a function of the *whole panel* rather than fifteen
+independent tiles, things flow across keys — waves travel, rain falls down
 columns, a blast expands from the middle. Pressing a physical key sends a
 ripple outward through whatever is playing.
+
+Describe an **application** — *a presentation remote*, *a deck for reviewing
+pull requests*, *a DJ rig* — and you also get a Layout: real icons on the keys,
+grouped and labelled, over a deliberately dimmed animation so the glyphs stay
+readable.
+
+### The icons are chosen, not drawn
+
+A language model asked to emit SVG path data produces shapes nobody
+recognises. It is excellent at *choosing* and terrible at *drawing*, so it
+never draws. It picks from a closed vocabulary of 370 curated
+[Lucide](https://lucide.dev) icons — every name it can choose is guaranteed to
+exist and guaranteed to render. Misses are caught and repaired: `presentaton`
+becomes `presentation`, `next` becomes `chevron-right`, and an invented name is
+handed back to Gemini to fix.
+
+Creativity goes into the composition — which icons, how they group, what gets
+an accent, what stays blank, what the animation behind them is doing.
+Recognisability is not traded away to get it.
+
+Run `npm run icons` to regenerate the vocabulary; it is defined in one place,
+`scripts/build-icons.mjs`.
 
 ## Without a Stream Deck
 
@@ -42,18 +64,19 @@ you switch to another app the tab goes hidden and `requestAnimationFrame`
 stops — so the render loop moves onto a worker-driven clock and the panel keeps
 animating, which is the entire reason a Stream Deck sits on a desk.
 
-## The contract
+## The contracts
 
-Everything renderable is a Dream, and there is exactly one definition of what
-that means: [CONTRACT.md](./CONTRACT.md). Gemini is held to it by a response
-schema, a denylist, a terminating-sweep probe in a Web Worker, and a repair
-loop that hands its own failures back to it. Nothing that fails validation
-reaches the renderer.
+Two, and they compose: a **Dream** is the animation, a **Layout** is what is
+drawn on top. Both are defined in one place, [CONTRACT.md](./CONTRACT.md).
+Gemini is held to them by a response schema, a denylist, a terminating-sweep
+probe in a Web Worker, a closed icon vocabulary, and a repair loop that hands
+its own failures back to it. Nothing that fails validation reaches the
+renderer.
 
 Open the **Contract** panel to read the spec, see the field currently playing,
 edit it, and apply it. Hand-written fields go through exactly the same
 validation as generated ones — that is the test of whether the contract is
-real.
+real. Copy JSON gives you the whole scene, icons included.
 
 ## Keys
 
@@ -69,15 +92,19 @@ real.
 
 ```
 src/contract.ts   the Dream type, its schema, and the only path to a runnable field
-src/dreams.ts     built-ins and prompt seeds; held to the same contract
+src/layout.ts     the Layout type: icon-per-key validation and key rasterising
+src/icons.ts      the closed icon vocabulary, name resolution, SVG rasterising
+src/dreams.ts     built-ins and prompt seeds; held to the same contracts
 src/gemini.ts     structured-output request, error mapping, repair loop
-src/deck.ts       WebHID: one panel image where supported, per-key writes where not
+src/deck.ts       WebHID: one panel image for animations, per-key writes for glyphs
 src/engine.ts     one field evaluation per frame, feeding preview and hardware
 src/store.ts      localStorage: key, model, shelf, knobs
 src/main.ts       wiring
+scripts/          regenerates src/icons.json from lucide-static
 ```
 
-`contract.ts` depends on nothing. Everything else depends on it.
+`contract.ts` depends on nothing. `icons.ts` depends only on its generated
+data. Everything else depends on those.
 
 ## Requirements
 
