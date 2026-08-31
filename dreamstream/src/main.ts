@@ -1,0 +1,446 @@
+import { validate, serialise, compile, FIELD_DOC, CONTRACT_VERSION, type Dream, type DreamSpec } from './contract';
+import { IDLE, CONJURING, STARTERS, SEEDS } from './dreams';
+import { conjure, listFlashModels } from './gemini';
+import { Deck } from './deck';
+import { Engine } from './engine';
+import { store, DEFAULT_MODEL, type Knobs } from './store';
+
+const $ = <T extends HTMLElement>(id: string): T => {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`missing element #${id}`);
+  return el as T;
+};
+
+const ui = {
+  keys: $<HTMLDivElement>('keys'),
+  name: $<HTMLHeadingElement>('dreamName'),
+  vibe: $<HTMLParagraphElement>('dreamVibe'),
+  composer: $<HTMLFormElement>('composer'),
+  prompt: $<HTMLInputElement>('prompt'),
+  conjure: $<HTMLButtonElement>('conjureBtn'),
+  remix: $<HTMLButtonElement>('remixBtn'),
+  status: $<HTMLParagraphElement>('status'),
+  seeds: $<HTMLDivElement>('seeds'),
+  shelf: $<HTMLElement>('shelf'),
+  keep: $<HTMLButtonElement>('keepBtn'),
+  play: $<HTMLButtonElement>('playBtn'),
+  deckBtn: $<HTMLButtonElement>('deckBtn'),
+  deckDot: $<HTMLSpanElement>('deckDot'),
+  deckLabel: $<HTMLSpanElement>('deckLabel'),
+  settingsDlg: $<HTMLDialogElement>('settingsDlg'),
+  contractDlg: $<HTMLDialogElement>('contractDlg'),
+  apiKey: $<HTMLInputElement>('apiKey'),
+  model: $<HTMLInputElement>('model'),
+  modelList: $<HTMLDataListElement>('modelList'),
+  modelHint: $<HTMLElement>('modelHint'),
+  contractDoc: $<HTMLPreElement>('contractDoc'),
+  fieldSrc: $<HTMLTextAreaElement>('fieldSrc'),
+  fieldErr: $<HTMLParagraphElement>('fieldErr'),
+  sliders: {
+    speed: $<HTMLInputElement>('speed'),
+    hue: $<HTMLInputElement>('hue'),
+    glow: $<HTMLInputElement>('glow'),
+  },
+  outputs: {
+    speed: $<HTMLOutputElement>('speedOut'),
+    hue: $<HTMLOutputElement>('hueOut'),
+    glow: $<HTMLOutputElement>('glowOut'),
+  },
+};
+
+// --- state -----------------------------------------------------------------
+
+let deck: Deck | null = null;
+let busy = false;
+let shelf: DreamSpec[] = store.shelf.get();
+let conjuring: Dream | null = null;
+
+const engine = new Engine({
+  mount: ui.keys,
+  onFieldError: (dream, message) => {
+    say(`"${dream.name}" broke mid-flight: ${message}`, 'bad');
+    // Dropping the field can leave nothing playing; the panel should never go dead.
+    if (!engine.current) void load(IDLE).then((d) => show(d, { fade: false }));
+  },
+});
+
+// --- presentation ----------------------------------------------------------
+
+function say(text: string, kind: '' | 'bad' | 'busy' = ''): void {
+  ui.status.textContent = text;
+  ui.status.className = `status ${kind}`;
+}
+
+/** Re-themes the whole app around a dream. The transition lives in CSS. */
+function wear(dream: Dream): void {
+  const root = document.documentElement.style;
+  const p = dream.palette;
+  for (let i = 0; i < 4; i++) root.setProperty(`--c${i + 1}`, p[i % p.length] ?? '#7C5CFF');
+  ui.name.textContent = dream.name;
+  ui.vibe.textContent = dream.vibe;
+  // Restart the entrance animation so a new name arrives rather than just appearing.
+  ui.name.style.animation = 'none';
+  void ui.name.offsetWidth;
+  ui.name.style.animation = '';
+}
+
+function show(dream: Dream, opts: { fade?: boolean } = {}): void {
+  engine.play(dream, opts);
+  wear(dream);
+  store.last.set(serialise(dream));
+  paintShelf();
+}
+
+// --- dream sources ---------------------------------------------------------
+
+/** Built-ins go through the same validator as anything generated. */
+async function load(spec: DreamSpec): Promise<Dream> {
+  return validate(spec, engine.grid.cols, engine.grid.rows);
+}
+
+async function loadOrIdle(spec: DreamSpec | null): Promise<Dream> {
+  if (!spec) return load(IDLE);
+  try {
+    return await load(spec);
+  } catch {
+    return load(IDLE);
+  }
+}
+
+// --- conjuring -------------------------------------------------------------
+
+async function summon(idea: string, { remix = false } = {}): Promise<void> {
+  if (busy) return;
+  const text = idea.trim();
+  if (!text) {
+    ui.prompt.focus();
+    return;
+  }
+  const apiKey = store.apiKey.get();
+  if (!apiKey) {
+    say('Add a Gemini API key in Settings first.', 'bad');
+    ui.settingsDlg.showModal();
+    return;
+  }
+
+  const fallback = engine.current;
+  busy = true;
+  ui.conjure.disabled = true;
+  ui.remix.disabled = true;
+  say(remix ? 'Reworking it' : 'Dreaming', 'busy');
+  if (conjuring) engine.play(conjuring); // the hardware itself becomes the progress indicator
+
+  try {
+    const basis = remix ? fallback : undefined;
+    const dream = await conjure(text, {
+      apiKey,
+      model: store.model.get() || DEFAULT_MODEL,
+      grid: engine.grid,
+      basis: basis ?? undefined,
+      onRepair: (attempt) => say(attempt === 1 ? 'Almost — adjusting' : 'One more pass', 'busy'),
+    });
+    show(dream);
+    say(`${dream.name} · ${dream.vibe}`);
+    ui.prompt.value = '';
+  } catch (err) {
+    if (fallback) engine.play(fallback, { fade: false });
+    say(err instanceof Error ? err.message : String(err), 'bad');
+  } finally {
+    busy = false;
+    ui.conjure.disabled = false;
+    ui.remix.disabled = false;
+  }
+}
+
+// --- shelf -----------------------------------------------------------------
+
+function paintShelf(): void {
+  const entries: { spec: DreamSpec; builtin: boolean }[] = [
+    ...STARTERS.map((spec) => ({ spec, builtin: true })),
+    ...shelf.map((spec) => ({ spec, builtin: false })),
+  ];
+  const playing = engine.current?.field;
+
+  ui.shelf.replaceChildren(
+    ...entries.map(({ spec, builtin }) => {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = `card${spec.field === playing ? ' on' : ''}`;
+      card.title = spec.vibe;
+
+      const swatch = document.createElement('span');
+      swatch.className = 'swatch';
+      for (const c of spec.palette.slice(0, 4)) {
+        const i = document.createElement('i');
+        i.style.background = c;
+        swatch.append(i);
+      }
+      card.append(swatch, document.createTextNode(spec.name));
+
+      if (!builtin) {
+        const x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'x';
+        x.textContent = '×';
+        x.title = 'Forget this dream';
+        x.addEventListener('click', (e) => {
+          e.stopPropagation();
+          shelf = shelf.filter((s) => s !== spec);
+          store.shelf.set(shelf);
+          paintShelf();
+        });
+        card.append(x);
+      }
+
+      card.addEventListener('click', async () => {
+        try {
+          show(await load(spec));
+          say(`${spec.name} · ${spec.vibe}`);
+        } catch (err) {
+          say(err instanceof Error ? err.message : 'that dream will not load', 'bad');
+        }
+      });
+      return card;
+    }),
+  );
+}
+
+function keep(): void {
+  const dream = engine.current;
+  if (!dream) return;
+  if (shelf.some((s) => s.field === dream.field) || STARTERS.some((s) => s.field === dream.field)) {
+    say(`${dream.name} is already on the shelf.`);
+    return;
+  }
+  shelf = [serialise(dream), ...shelf];
+  store.shelf.set(shelf);
+  paintShelf();
+  say(`Kept ${dream.name}.`);
+}
+
+// --- device ----------------------------------------------------------------
+
+function paintDeckButton(): void {
+  const live = deck?.alive ?? false;
+  ui.deckDot.className = `dot${live ? ' live' : ''}`;
+  ui.deckBtn.classList.toggle('on', live);
+  ui.deckLabel.textContent = live ? deck!.info.name : 'Connect deck';
+  ui.deckBtn.title = live ? `${deck!.info.keys} keys · ${deck!.info.panelWrite ? 'panel writes' : 'per-key writes'} · click to release` : 'Connect a Stream Deck over WebHID';
+}
+
+const deckHandlers = {
+  onPress: (col: number, row: number) => engine.ripple(col, row),
+  onRotate: (index: number, delta: number) => {
+    // Dial 0 rides the speed, any other dial rides the hue.
+    const slider = index === 0 ? ui.sliders.speed : ui.sliders.hue;
+    const step = index === 0 ? 6 : 5;
+    slider.value = String(Number(slider.value) + delta * step);
+    slider.dispatchEvent(new Event('input'));
+  },
+  onLost: (reason: string) => {
+    deck = null;
+    engine.detach();
+    paintDeckButton();
+    say(`Deck disconnected — ${reason}.`, 'bad');
+  },
+};
+
+async function adopt(d: Deck | null, announce: boolean): Promise<void> {
+  if (!d) return;
+  deck = d;
+  engine.attach(d);
+  paintDeckButton();
+  // The grid may have changed shape, so the running dream is re-validated for it.
+  const spec = engine.current ? serialise(engine.current) : null;
+  show(await loadOrIdle(spec), { fade: false });
+  if (announce) say(`${d.info.name} · ${d.info.cols}×${d.info.rows}. Press a key.`);
+}
+
+async function toggleDeck(): Promise<void> {
+  if (deck?.alive) {
+    await deck.close();
+    deck = null;
+    engine.detach();
+    paintDeckButton();
+    say('Deck released. The preview keeps dreaming.');
+    return;
+  }
+  try {
+    await adopt(await Deck.request(deckHandlers), true);
+  } catch (err) {
+    say(err instanceof Error ? err.message : 'could not open the deck', 'bad');
+  }
+}
+
+// --- knobs -----------------------------------------------------------------
+
+function readKnobs(): Knobs {
+  return {
+    speed: Number(ui.sliders.speed.value) / 100,
+    hue: Number(ui.sliders.hue.value),
+    glow: Number(ui.sliders.glow.value) / 100,
+  };
+}
+
+function applyKnobs(persist = true): void {
+  const k = readKnobs();
+  engine.setKnobs(k);
+  ui.outputs.speed.textContent = `${k.speed.toFixed(1)}×`;
+  ui.outputs.hue.textContent = `${Math.round(k.hue)}°`;
+  ui.outputs.glow.textContent = `${Math.round(k.glow * 100)}%`;
+  if (persist) store.knobs.set(k);
+}
+
+// --- contract panel --------------------------------------------------------
+
+function openContract(): void {
+  ui.contractDoc.textContent = `Dream v${CONTRACT_VERSION}\n\n${FIELD_DOC}`;
+  ui.fieldSrc.value = engine.current?.field ?? '';
+  ui.fieldErr.textContent = '';
+  ui.contractDlg.showModal();
+}
+
+async function applyField(): Promise<void> {
+  const base = engine.current;
+  if (!base) return;
+  ui.fieldErr.textContent = '';
+  try {
+    const dream = await validate({ ...serialise(base), field: ui.fieldSrc.value, prompt: 'hand-written' }, engine.grid.cols, engine.grid.rows);
+    show(dream, { fade: false });
+    say(`Applied your edit to ${dream.name}.`);
+    ui.contractDlg.close();
+  } catch (err) {
+    ui.fieldErr.textContent = err instanceof Error ? err.message : String(err);
+  }
+}
+
+// --- settings --------------------------------------------------------------
+
+async function refreshModels(): Promise<void> {
+  const key = ui.apiKey.value.trim() || store.apiKey.get();
+  if (!key) {
+    ui.modelHint.textContent = 'Add a key first, then this can list the models it reaches.';
+    return;
+  }
+  ui.modelHint.textContent = 'Asking Google what your key can use…';
+  try {
+    const models = await listFlashModels(key);
+    ui.modelList.replaceChildren(...models.map((m) => Object.assign(document.createElement('option'), { value: m })));
+    ui.modelHint.textContent = models.length ? `${models.length} Flash models available. Click the field to choose.` : 'No Flash models found for this key.';
+  } catch (err) {
+    ui.modelHint.textContent = err instanceof Error ? err.message : 'could not list models';
+  }
+}
+
+// --- wiring ----------------------------------------------------------------
+
+ui.composer.addEventListener('submit', (e) => {
+  e.preventDefault();
+  void summon(ui.prompt.value);
+});
+ui.remix.addEventListener('click', () => void summon(ui.prompt.value || 'take it somewhere new', { remix: true }));
+ui.keep.addEventListener('click', keep);
+ui.deckBtn.addEventListener('click', () => void toggleDeck());
+$('settingsBtn').addEventListener('click', () => {
+  ui.apiKey.value = store.apiKey.get();
+  ui.model.value = store.model.get();
+  ui.settingsDlg.showModal();
+});
+$('contractBtn').addEventListener('click', openContract);
+$('applyField').addEventListener('click', () => void applyField());
+$('copyDream').addEventListener('click', () => {
+  const dream = engine.current;
+  if (!dream) return;
+  void navigator.clipboard.writeText(JSON.stringify(serialise(dream), null, 2));
+  say(`Copied ${dream.name} as JSON.`);
+});
+$('refreshModels').addEventListener('click', () => void refreshModels());
+$('forgetKey').addEventListener('click', () => {
+  store.apiKey.clear();
+  ui.apiKey.value = '';
+  say('Key forgotten.');
+});
+
+ui.apiKey.addEventListener('change', () => store.apiKey.set(ui.apiKey.value));
+ui.model.addEventListener('change', () => store.model.set(ui.model.value.trim() || DEFAULT_MODEL));
+
+ui.play.addEventListener('click', () => {
+  engine.paused = !engine.paused;
+  ui.play.textContent = engine.paused ? '▶' : '❚❚';
+  ui.play.setAttribute('aria-label', engine.paused ? 'Play' : 'Pause');
+});
+
+for (const slider of Object.values(ui.sliders)) slider.addEventListener('input', () => applyKnobs());
+
+// Clicking a preview key ripples exactly as pressing the real one does.
+ui.keys.addEventListener('pointerdown', (e) => {
+  const target = e.target as HTMLElement;
+  const index = Number(target.dataset['index']);
+  if (Number.isFinite(index)) engine.ripple(index % engine.grid.cols, Math.floor(index / engine.grid.cols));
+});
+
+document.addEventListener('keydown', (e) => {
+  const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+  if (e.key === '/' && !typing) {
+    e.preventDefault();
+    ui.prompt.focus();
+  } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    void summon(ui.prompt.value || 'take it somewhere new', { remix: true });
+  } else if (e.key.toLowerCase() === 's' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    keep();
+  } else if (e.code === 'Space' && !typing) {
+    e.preventDefault();
+    ui.play.click();
+  }
+});
+
+function paintSeeds(): void {
+  const picks = [...SEEDS].sort(() => Math.random() - 0.5).slice(0, 4);
+  ui.seeds.replaceChildren(
+    ...picks.map((seed) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ghost';
+      b.textContent = seed;
+      b.addEventListener('click', () => {
+        ui.prompt.value = seed;
+        void summon(seed);
+      });
+      return b;
+    }),
+  );
+}
+
+// --- boot ------------------------------------------------------------------
+
+async function boot(): Promise<void> {
+  const knobs = store.knobs.get();
+  ui.sliders.speed.value = String(Math.round(knobs.speed * 100));
+  ui.sliders.hue.value = String(knobs.hue);
+  ui.sliders.glow.value = String(Math.round(knobs.glow * 100));
+  applyKnobs(false);
+
+  conjuring = await load(CONJURING);
+  show(await loadOrIdle(store.last.get()), { fade: false });
+  engine.start();
+
+  paintSeeds();
+  paintShelf();
+  paintDeckButton();
+
+  // A deck the user already granted reopens with no dialog and no ceremony.
+  await adopt(await Deck.reopen(deckHandlers).catch(() => null), false);
+
+  if (!Deck.supported) say('This browser has no WebHID — the preview works, the hardware will not.');
+  else if (!deck) say(store.apiKey.get() ? 'Describe a dream, or press a key to ripple it.' : 'Add a Gemini API key in Settings to start dreaming.');
+  else say(`${deck.info.name} reconnected. Press a key.`);
+}
+
+void boot().catch((err) => say(err instanceof Error ? err.message : 'failed to start', 'bad'));
+
+// Leaving the panel lit after the tab closes would be rude.
+window.addEventListener('pagehide', () => void deck?.close());
+
+export { compile }; // re-exported so the contract module is reachable from the console

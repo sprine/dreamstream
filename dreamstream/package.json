@@ -1,0 +1,20 @@
+{
+  "name": "dreamstream",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Describe a dream. Watch it land on your Stream Deck.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@elgato-stream-deck/webhid": "^7.6.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  }
+}

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dreamstream</title>
+  <meta name="description" content="Describe a dream. Watch it land on your Stream Deck." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%9C%A6%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div class="aura" aria-hidden="true"></div>
+
+  <header class="bar">
+    <div class="mark">✦ dreamstream</div>
+    <div class="grow"></div>
+    <button id="deckBtn" class="chip" type="button">
+      <span class="dot" id="deckDot"></span><span id="deckLabel">Connect deck</span>
+    </button>
+    <button id="contractBtn" class="chip" type="button">Contract</button>
+    <button id="settingsBtn" class="chip icon" type="button" aria-label="Settings">⚙</button>
+  </header>
+
+  <main>
+    <section class="stage">
+      <div class="shell">
+        <div class="keys" id="keys" role="img" aria-label="Live preview of the Stream Deck panel"></div>
+      </div>
+      <div class="plate">
+        <h1 id="dreamName">—</h1>
+        <p id="dreamVibe">waking up…</p>
+      </div>
+    </section>
+
+    <form class="composer" id="composer" autocomplete="off">
+      <span class="spark" aria-hidden="true">✦</span>
+      <input id="prompt" type="text" placeholder="describe a dream…" aria-label="Describe a dream" maxlength="240" />
+      <button id="remixBtn" class="ghost" type="button" title="Evolve what is playing (⌘⏎)">Remix</button>
+      <button id="conjureBtn" class="go" type="submit">Conjure</button>
+    </form>
+
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+
+    <div class="seeds" id="seeds"></div>
+
+    <section class="knobs" aria-label="Live controls">
+      <button id="playBtn" class="chip icon" type="button" aria-label="Pause">❚❚</button>
+      <label class="knob">
+        <span>Speed</span>
+        <input id="speed" type="range" min="10" max="300" value="100" />
+        <output id="speedOut">1.0×</output>
+      </label>
+      <label class="knob">
+        <span>Hue</span>
+        <input id="hue" type="range" min="-180" max="180" value="0" />
+        <output id="hueOut">0°</output>
+      </label>
+      <label class="knob">
+        <span>Glow</span>
+        <input id="glow" type="range" min="10" max="150" value="100" />
+        <output id="glowOut">100%</output>
+      </label>
+      <button id="keepBtn" class="chip" type="button" title="Keep this dream (⌘S)">♥ Keep</button>
+    </section>
+
+    <section class="shelf" id="shelf" aria-label="Kept dreams"></section>
+  </main>
+
+  <dialog id="settingsDlg" class="sheet">
+    <form method="dialog">
+      <h2>Settings</h2>
+      <label class="field">
+        <span>Gemini API key</span>
+        <input id="apiKey" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false" />
+        <small>Stored only in this browser, on this origin. It is sent to Google's API and nowhere else.
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Get one →</a></small>
+      </label>
+      <label class="field">
+        <span>Model</span>
+        <input id="model" list="modelList" placeholder="gemini-2.5-flash" autocomplete="off" spellcheck="false" />
+        <datalist id="modelList"></datalist>
+        <small id="modelHint">Any Flash model your key can reach. <button id="refreshModels" type="button" class="link">List them →</button></small>
+      </label>
+      <div class="row">
+        <button id="forgetKey" type="button" class="ghost danger">Forget key</button>
+        <div class="grow"></div>
+        <button class="go" value="close">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="contractDlg" class="sheet wide">
+    <form method="dialog">
+      <h2>The contract</h2>
+      <p class="lede">Every dream — built in, generated, or hand-written — is this and nothing more. Edit the field and apply it; the engine cannot tell who wrote it.</p>
+      <pre class="doc" id="contractDoc"></pre>
+      <label class="field">
+        <span>field</span>
+        <textarea id="fieldSrc" spellcheck="false" rows="14"></textarea>
+      </label>
+      <p class="err" id="fieldErr"></p>
+      <div class="row">
+        <button id="copyDream" type="button" class="ghost">Copy JSON</button>
+        <div class="grow"></div>
+        <button id="applyField" type="button" class="go">Apply</button>
+        <button class="ghost" value="close">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
