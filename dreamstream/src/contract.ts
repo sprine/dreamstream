@@ -163,15 +163,16 @@ const PROBE_SOURCE = `
 const SHADOWED = ${JSON.stringify(SHADOWED)};
 const ARGS = ${JSON.stringify(FIELD_ARGS)};
 self.onmessage = (e) => {
-  const { body, cols, rows } = e.data;
+  const { body, cols, rows, bpm } = e.data;
   try {
     const factory = new Function(...SHADOWED, '"use strict"; return function(' + ARGS.join(',') + '){\\n' + body + '\\n};');
     const field = factory(...SHADOWED.map(() => undefined));
+    const hz = bpm / 60;
     const k = { col: 0, row: 0, i: 0, cols, rows, rnd: 0.5, beat: 0, press: 0 };
     const sample = (t) => {
       k.i = k.row * cols + k.col;
       k.rnd = ((k.i * 2654435761) % 997) / 997;
-      k.beat = (t * 1.5) % 1;
+      k.beat = (t * hz) % 1;
       const out = field((k.col + 0.5) / cols, (k.row + 0.5) / rows, t, k, Math);
       if (!Array.isArray(out) || out.length !== 3) {
         throw new Error('field must return an array of three numbers, got ' + JSON.stringify(out));
@@ -213,8 +214,14 @@ self.onmessage = (e) => {
   }
 };`;
 
-/** Resolves with light statistics; rejects if the body throws or hangs. */
-export function probe(body: string, cols = 5, rows = 3): Promise<LightStats> {
+/**
+ * Resolves with light statistics; rejects if the body throws or hangs.
+ *
+ * `bpm` matters: the engine drives k.beat at the dream's own tempo, so probing
+ * at a fixed one would measure a beat-driven field's flicker at the wrong rate
+ * and could let something that strobes at 180bpm past as calm.
+ */
+export function probe(body: string, cols = 5, rows = 3, bpm = 72): Promise<LightStats> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(new Blob([PROBE_SOURCE], { type: 'text/javascript' }));
     const worker = new Worker(url);
@@ -236,7 +243,7 @@ export function probe(body: string, cols = 5, rows = 3): Promise<LightStats> {
       finish(() => (data.ok ? resolve({ lo: data.lo, hi: data.hi, flicker: data.flicker }) : reject(new ContractError(data.error ?? 'field failed'))));
     };
     worker.onerror = (e) => finish(() => reject(new ContractError(e.message || 'field failed to load')));
-    worker.postMessage({ body, cols, rows });
+    worker.postMessage({ body, cols, rows, bpm });
   });
 }
 
@@ -254,18 +261,19 @@ export async function validate(raw: unknown, cols = 5, rows = 3): Promise<Dream>
   const r = raw as Partial<DreamSpec>;
 
   const palette = (Array.isArray(r.palette) ? r.palette : []).filter((c) => typeof c === 'string' && HEX.test(c)).slice(0, 5);
-  const bpm = Number(r.bpm);
+  const raw_bpm = Number(r.bpm);
+  const bpm = Number.isFinite(raw_bpm) ? Math.min(180, Math.max(20, raw_bpm)) : 72;
   const field = String(r.field ?? '');
 
   lint(field);
-  const light = await probe(field, cols, rows);
+  const light = await probe(field, cols, rows, bpm);
 
   return {
     version: CONTRACT_VERSION,
     name: clean(r.name, 40) || 'Untitled Dream',
     vibe: clean(r.vibe, 90) || 'no words for it',
     palette: palette.length >= 3 ? palette : PALETTE_FALLBACK,
-    bpm: Number.isFinite(bpm) ? Math.min(180, Math.max(20, bpm)) : 72,
+    bpm,
     field,
     prompt: clean(r.prompt, 240),
     fn: compile(field),

@@ -145,7 +145,6 @@ export interface ConjureOptions {
   basis?: Scene | undefined;
   /** Called on each repair attempt, so the UI can stay honest about what is happening. */
   onRepair?: (attempt: number, problem: string) => void;
-  signal?: AbortSignal | undefined;
 }
 
 const MAX_REPAIRS = 2;
