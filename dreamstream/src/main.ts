@@ -74,6 +74,7 @@ const ui = {
 
 let deck: Deck | null = null;
 let busy = false;
+let cancelBusy: AbortController | null = null;
 let shelf: SceneSpec[] = store.shelf.get();
 let conjuring: Dream | null = null;
 /** What is playing, including anything worn on the keys. */
@@ -259,7 +260,9 @@ async function summon(idea: string, { remix = false } = {}): Promise<void> {
 
   const fallback = scene;
   busy = true;
-  ui.conjure.disabled = true;
+  const controller = new AbortController();
+  cancelBusy = controller;
+  ui.conjure.textContent = 'Cancel';
   ui.remix.disabled = true;
   say(remix ? 'Reworking it' : 'Dreaming', 'busy');
   // The hardware itself becomes the progress indicator: the cauldron starts
@@ -275,16 +278,19 @@ async function summon(idea: string, { remix = false } = {}): Promise<void> {
       grid: engine.grid,
       basis: basis ?? undefined,
       onRepair: (attempt) => say(attempt === 1 ? 'Almost — adjusting' : 'One more pass', 'busy'),
+      signal: controller.signal,
     });
     await show(next);
     say(next.layout ? `${next.layout.name} · ${next.layout.purpose}` : `${next.dream.name} · ${next.dream.vibe}`);
     ui.prompt.value = '';
   } catch (err) {
     if (fallback) await show(fallback, { fade: false });
-    say(err instanceof Error ? err.message : String(err), 'bad');
+    const message = err instanceof Error ? err.message : String(err);
+    say(message, message === 'Cancelled.' ? '' : 'bad');
   } finally {
     busy = false;
-    ui.conjure.disabled = false;
+    cancelBusy = null;
+    ui.conjure.textContent = 'Conjure';
     ui.remix.disabled = false;
   }
 }
@@ -679,6 +685,10 @@ async function refreshModels(): Promise<void> {
 
 ui.composer.addEventListener('submit', (e) => {
   e.preventDefault();
+  if (busy) {
+    cancelBusy?.abort();
+    return;
+  }
   void summon(ui.prompt.value);
 });
 ui.remix.addEventListener('click', () => void summon(ui.prompt.value || 'take it somewhere new', { remix: true }));

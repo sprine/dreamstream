@@ -113,19 +113,37 @@ function describeHttpError(status: number, message: string): string {
   return message || `Gemini returned ${status}.`;
 }
 
-async function call(apiKey: string, model: string, body: unknown): Promise<string> {
+const REQUEST_TIMEOUT_MS = 45_000;
+
+/** Why the request signal is aborted, if it is — same check for the fetch and the body read. */
+function abortReason(signal: AbortSignal | undefined, timeout: AbortSignal): string | null {
+  if (signal?.aborted) return 'Cancelled.';
+  if (timeout.aborted) return 'Gemini took too long to respond. Try again.';
+  return null;
+}
+
+async function call(apiKey: string, model: string, body: unknown, signal?: AbortSignal): Promise<string> {
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(`${ENDPOINT}/models/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify(body),
+      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
     });
   } catch {
-    throw new Error('Could not reach Gemini. Check your connection.');
+    throw new Error(abortReason(signal, timeout) ?? 'Could not reach Gemini. Check your connection.');
   }
 
-  const data = (await res.json().catch(() => ({}))) as GeminiResponse;
+  // A timeout or Cancel after headers arrive aborts the body stream too, so
+  // res.json() rejects with the same AbortError — map it the same way instead
+  // of letting the bare catch below turn it into a fabricated "no response".
+  const data = (await res.json().catch(() => {
+    const reason = abortReason(signal, timeout);
+    if (reason) throw new Error(reason);
+    return {};
+  })) as GeminiResponse;
   if (!res.ok) throw new Error(describeHttpError(res.status, data.error?.message ?? ''));
 
   if (data.promptFeedback?.blockReason) throw new Error(`Gemini declined that idea (${data.promptFeedback.blockReason}). Try describing it differently.`);
@@ -145,6 +163,8 @@ export interface ConjureOptions {
   basis?: Scene | undefined;
   /** Called on each repair attempt, so the UI can stay honest about what is happening. */
   onRepair?: (attempt: number, problem: string) => void;
+  /** Aborts the in-flight request, e.g. from a Cancel affordance while busy. */
+  signal?: AbortSignal;
 }
 
 const MAX_REPAIRS = 2;
@@ -156,7 +176,7 @@ const MAX_REPAIRS = 2;
  * the renderer.
  */
 export async function conjure(idea: string, opts: ConjureOptions): Promise<Scene> {
-  const { apiKey, model, grid, basis, onRepair } = opts;
+  const { apiKey, model, grid, basis, onRepair, signal } = opts;
   if (!apiKey) throw new Error('Add a Gemini API key in Settings first.');
 
   const opening = basis
@@ -171,20 +191,25 @@ export async function conjure(idea: string, opts: ConjureOptions): Promise<Scene
   let lastError = '';
 
   for (let attempt = 0; attempt <= MAX_REPAIRS; attempt++) {
-    const text = await call(apiKey, model, {
-      systemInstruction: { parts: [{ text: SYSTEM(grid) }] },
-      contents: turns,
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: SCENE_SCHEMA,
-        temperature: attempt === 0 ? 1.15 : 0.4,
-        candidateCount: 1,
-        // 2.5 Flash reasons for seconds before answering unless told not to.
-        // The schema, the contract and the repair loop are the guidance here,
-        // so that time buys nothing but waiting.
-        ...(model.includes('2.5') && model.includes('flash') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+    const text = await call(
+      apiKey,
+      model,
+      {
+        systemInstruction: { parts: [{ text: SYSTEM(grid) }] },
+        contents: turns,
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: SCENE_SCHEMA,
+          temperature: attempt === 0 ? 1.15 : 0.4,
+          candidateCount: 1,
+          // 2.5 Flash reasons for seconds before answering unless told not to.
+          // The schema, the contract and the repair loop are the guidance here,
+          // so that time buys nothing but waiting.
+          ...(model.includes('2.5') && model.includes('flash') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+        },
       },
-    });
+      signal,
+    );
 
     let parsed: unknown;
     try {
@@ -216,6 +241,7 @@ export async function conjure(idea: string, opts: ConjureOptions): Promise<Scene
     });
   }
 
+  if (signal?.aborted) throw new Error('Cancelled.');
   throw new Error(`Gemini could not produce something valid (${lastError}). Try wording the idea differently.`);
 }
 
