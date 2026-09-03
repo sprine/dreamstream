@@ -1,4 +1,4 @@
-import { validate, serialise, compile, FIELD_DOC, CONTRACT_VERSION, type Dream } from './contract';
+import { validate, serialise, compile, type Dream } from './contract';
 import { renderKeys, validateLayout, type Scene, type SceneSpec } from './layout';
 import { IDLE, CONJURING, STARTERS, SEEDS } from './dreams';
 import { conjure, listFlashModels } from './gemini';
@@ -34,7 +34,6 @@ const ui = {
   deckDot: $<HTMLSpanElement>('deckDot'),
   deckLabel: $<HTMLSpanElement>('deckLabel'),
   settingsDlg: $<HTMLDialogElement>('settingsDlg'),
-  contractDlg: $<HTMLDialogElement>('contractDlg'),
   landingBtn: $<HTMLButtonElement>('landingBtn'),
   landingDlg: $<HTMLDialogElement>('landingDlg'),
   landingOptions: $<HTMLDivElement>('landingOptions'),
@@ -44,10 +43,6 @@ const ui = {
   model: $<HTMLInputElement>('model'),
   modelList: $<HTMLDataListElement>('modelList'),
   modelHint: $<HTMLElement>('modelHint'),
-  contractDoc: $<HTMLPreElement>('contractDoc'),
-  layoutLine: $<HTMLParagraphElement>('layoutLine'),
-  fieldSrc: $<HTMLTextAreaElement>('fieldSrc'),
-  fieldErr: $<HTMLParagraphElement>('fieldErr'),
   sliders: {
     speed: $<HTMLInputElement>('speed'),
     hue: $<HTMLInputElement>('hue'),
@@ -461,36 +456,6 @@ function replayLanding(): void {
   if (engine.replay()) say(`${scene?.layout?.name ?? scene?.dream.name ?? 'It'} lands again.`);
 }
 
-// --- contract panel --------------------------------------------------------
-
-function openContract(): void {
-  ui.contractDoc.textContent = `Dream v${CONTRACT_VERSION}\n\n${FIELD_DOC}`;
-  ui.fieldSrc.value = scene?.dream.field ?? '';
-  ui.fieldErr.textContent = '';
-  const layout = scene?.layout;
-  ui.layoutLine.textContent = layout
-    ? `Wearing "${layout.name}" — ${layout.keys.filter((k) => k.icon !== 'blank').length} of ${layout.keys.length} keys carry a glyph. Copy JSON to see them.`
-    : 'No layout. Ask for an app or a set of controls and the keys get icons.';
-  ui.contractDlg.showModal();
-}
-
-async function applyField(): Promise<void> {
-  if (!scene) return;
-  ui.fieldErr.textContent = '';
-  try {
-    const dream = await validate(
-      { ...serialise(scene.dream), field: ui.fieldSrc.value, prompt: 'hand-written' },
-      engine.grid.cols,
-      engine.grid.rows,
-    );
-    await show({ dream, layout: scene.layout }, { fade: false });
-    say(`Applied your edit to ${dream.name}.`);
-    ui.contractDlg.close();
-  } catch (err) {
-    ui.fieldErr.textContent = err instanceof Error ? err.message : String(err);
-  }
-}
-
 // --- settings --------------------------------------------------------------
 
 async function refreshModels(): Promise<void> {
@@ -528,7 +493,6 @@ function openSettings(): void {
   ui.settingsDlg.showModal();
 }
 $('settingsBtn').addEventListener('click', openSettings);
-$('contractBtn').addEventListener('click', openContract);
 ui.landingBtn.addEventListener('click', () => {
   paintLandingControls();
   ui.landingDlg.showModal();
@@ -543,12 +507,6 @@ ui.replayLanding.addEventListener('click', () => {
   replayLanding();
 });
 reducedMotion.addEventListener('change', paintLandingControls);
-$('applyField').addEventListener('click', () => void applyField());
-$('copyDream').addEventListener('click', () => {
-  if (!scene) return;
-  void navigator.clipboard.writeText(JSON.stringify(flatten(scene), null, 2));
-  say(`Copied ${scene.layout?.name ?? scene.dream.name} as JSON.`);
-});
 $('refreshModels').addEventListener('click', () => void refreshModels());
 $('forgetKey').addEventListener('click', () => {
   store.apiKey.clear();

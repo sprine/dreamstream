@@ -91,11 +91,6 @@ probe in a Web Worker, a closed icon vocabulary, and a repair loop that hands
 its own failures back to it. Nothing that fails validation reaches the
 renderer.
 
-Open the **Contract** panel to read the spec, see the field currently playing,
-edit it, and apply it. Hand-written fields go through exactly the same
-validation as generated ones — that is the test of whether the contract is
-real. Copy JSON gives you the whole scene, icons included.
-
 ## Keeping a dream
 
 The dots under the panel are the whole library. Before you have a key they

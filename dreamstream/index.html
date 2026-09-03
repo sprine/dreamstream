@@ -19,7 +19,6 @@
       <span class="dot" id="deckDot"></span><span id="deckLabel">Connect deck</span>
     </button>
     <button id="landingBtn" class="chip" type="button" title="How a new dream arrives on the panel">Landing</button>
-    <button id="contractBtn" class="chip" type="button">Contract</button>
     <button id="settingsBtn" class="chip icon" type="button" aria-label="Settings">⚙</button>
   </header>
 
@@ -115,26 +114,6 @@
         <button id="replayLanding" type="button" class="ghost">Land this one again</button>
         <div class="grow"></div>
         <button class="go" value="close">Done</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="contractDlg" class="sheet wide">
-    <form method="dialog">
-      <h2>The contract</h2>
-      <p class="lede">Edit the function behind whatever's playing and apply — quicker than re-prompting Gemini for a one-number tweak.</p>
-      <pre class="doc" id="contractDoc"></pre>
-      <p class="lede" id="layoutLine"></p>
-      <label class="field">
-        <span>field</span>
-        <textarea id="fieldSrc" spellcheck="false" rows="14"></textarea>
-      </label>
-      <p class="err" id="fieldErr"></p>
-      <div class="row">
-        <button id="copyDream" type="button" class="ghost">Copy JSON</button>
-        <div class="grow"></div>
-        <button id="applyField" type="button" class="go">Apply</button>
-        <button class="ghost" value="close">Close</button>
       </div>
     </form>
   </dialog>
