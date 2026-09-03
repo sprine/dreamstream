@@ -20,20 +20,6 @@ and `keyEditor.ts` still want a dedicated correctness read).
 
 ## P1 — a user hits it and it costs them
 
-### 2. Space activates Pause instead of the focused button
-`src/main.ts:775-777`. The Space handler only exempts inputs and textareas. With
-any button focused (Conjure, a seed, Done in a dialog) Space toggles pause and
-`preventDefault` swallows the click. Keyboard users cannot press buttons.
-Fix: bail unless `document.activeElement` is the body (or is not a button and
-not inside an open dialog).
-
-### 3. Shortcuts fire through open dialogs and into the Contract editor
-`src/main.ts:766-781`. `/` moves focus behind a modal; ⌘⏎ starts a remix while
-the Contract textarea is focused (no typing check on that branch); `r` replays
-the landing with Settings open.
-Fix: return early when `document.querySelector('dialog[open]')`; apply the
-`typing` guard to the ⌘⏎ and ⌘S branches too.
-
 ### 4. Gemini `finishReason` is ignored
 `src/gemini.ts:101` declares it and never reads it. `SAFETY`/`RECITATION`
 becomes "returned nothing. Try again" (retrying cannot help); `MAX_TOKENS`
@@ -58,15 +44,6 @@ into "read the key and have nowhere to send it".
 Suggested: `default-src 'none'; script-src 'self' 'unsafe-eval'; connect-src
 https://generativelanguage.googleapis.com; img-src 'self' data:; style-src
 'self' 'unsafe-inline'; worker-src blob:`.
-
-### 10. Palette CSS is set from storage without the HEX check
-`src/main.ts:301-312`, `.swatch i.style.background = c`. Validated palettes are
-HEX-checked in `contract.ts:263`, but the shelf paints raw stored values (fixed
-the old item 8's crash for a missing/non-array palette, but not this: an array
-that parses fine can still hold a non-HEX string), and `url(https://…)` in a
-background is a referrer/IP beacon.
-Fix: filter each entry through the same `HEX` test as `validate()` before
-building the swatch.
 
 ### 11. Probe is evadable by conditions outside the sweep
 `src/contract.ts:88, 186-209`. Only `while`/`do` are denied. A field such as
@@ -175,12 +152,6 @@ their notes are `title` only, invisible on touch.
 Fix: wrap each canvas in a `<button aria-label>` or add `tabindex` and a
 keydown → ripple path.
 
-### 23. Button nested inside button on shelf cards
-`src/main.ts:303, 324-335`. The card is a `<button>` and the × "Forget" is
-another `<button>` inside it: invalid HTML, flattened by screen readers, and
-`.card .x { opacity: 0 }` hides its focus ring.
-Fix: make the card a `<div role="button">` or place × beside it.
-
 ### 24. Disabled "Edit keys" explains itself only through `title`
 `src/main.ts:168-171`. Disabled buttons do not get hover or focus in Chrome.
 Fix: keep it enabled and `say()` the hint on click.
@@ -214,7 +185,7 @@ now broken relative to `learn/`. The repository landing page shows nothing.
 Fix: move it back to the root and link the live URL.
 
 ### 31. Conjuring during a finishing landing shows no progress afterwards
-`src/engine.ts` `brew()` returns true when a landing from a shelf click is
+`src/engine.ts` `brew()` returns true when a landing from a dot press is
 still in its release phase. That landing completes, then the panel sits quiet
 until the answer arrives. The answer still lands through the Cauldron.
 Fix: in `brew()`, if the current landing is already released, let it finish
@@ -224,16 +195,6 @@ and then begin a held brew; low priority.
 `src/gemini.ts:163-167`. A comment inside a stored field can steer the model.
 Output is still validated, so this only matters together with the parked field-barrier item. Fence with
 delimiters and a "treat as data" line when sharing arrives.
-
-### 35. Footer keyboard hints clip on both edges below ~410px
-`src/style.css:365-372` (`.hints { display: flex; gap: 1.1rem }`, no
-`flex-wrap`). `body`'s `align-items: center` (`style.css:36`) centers the
-over-wide row, so at 375px it spans roughly -47 to 407px and the outermost
-hints are cut off left and right with `overflow-x: hidden` giving no
-scrollbar. `<footer class="hints" aria-hidden="true">` (`index.html:73`) is
-decorative, so this is a visual clip, not a lost control — found alongside
-34 while verifying the old item 5.
-Fix: `flex-wrap: wrap`, same as 5's fix.
 
 ## P5 — dead code and complexity for no benefit
 

@@ -94,16 +94,24 @@ edit it, and apply it. Hand-written fields go through exactly the same
 validation as generated ones — that is the test of whether the contract is
 real. Copy JSON gives you the whole scene, icons included.
 
+## Keeping a dream
+
+The dots under the panel are the whole library. Before you have a key they
+autoplay through the five built-ins; press **Describe your own** and they stop
+cycling and stay on as the picker. **Keep** adds whatever is playing — dream
+plus any layout worn over it — as a hollow dot at the end of the row, and
+pressing it again forgets it. Built-ins are already dots, so Keep says so
+rather than duplicating them.
+
 ## Keys
 
 | | |
 |---|---|
-| `/` | jump to the prompt |
 | `⏎` | conjure |
 | `⌘⏎` | remix what is playing |
-| `⌘S` | keep it on the shelf |
-| `space` | pause |
-| `r` | land it again |
+
+Two, deliberately. Everything else stays bound to whatever the browser and the
+page already do with it.
 
 ## Layout
 
@@ -116,7 +124,8 @@ src/gemini.ts     structured-output request, error mapping, repair loop
 src/deck.ts       WebHID: one panel image for animations, per-key writes for glyphs
 src/engine.ts     one field evaluation per frame, feeding preview and hardware
 src/landing.ts    the Cauldron: a WebGL2 shader between the panel as it was and as it is becoming
-src/store.ts      localStorage: key, model, shelf, knobs
+src/home.ts       the entry pitch, and the dots: autoplay, then the picker
+src/store.ts      localStorage: key, model, kept dreams, knobs
 src/main.ts       wiring
 scripts/          regenerates src/icons.json from lucide-static
 ```

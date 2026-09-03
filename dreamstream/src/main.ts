@@ -1,4 +1,4 @@
-import { validate, serialise, compile, FIELD_DOC, CONTRACT_VERSION, PALETTE_FALLBACK, type Dream } from './contract';
+import { validate, serialise, compile, FIELD_DOC, CONTRACT_VERSION, type Dream } from './contract';
 import { renderKeys, validateLayout, type Scene, type SceneSpec } from './layout';
 import { IDLE, CONJURING, STARTERS, SEEDS } from './dreams';
 import { conjure, listFlashModels } from './gemini';
@@ -8,7 +8,7 @@ import { store, DEFAULT_MODEL, type Knobs } from './store';
 import { BLANK } from './icons';
 import { openKeyEditor, closeKeyEditor, type KeyPatch } from './keyEditor';
 import { LANDINGS, type LandingName } from './landing';
-import { initHome } from './home';
+import { initHome, type HomeHandle } from './home';
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
@@ -27,7 +27,6 @@ const ui = {
   remix: $<HTMLButtonElement>('remixBtn'),
   status: $<HTMLParagraphElement>('status'),
   seeds: $<HTMLDivElement>('seeds'),
-  shelf: $<HTMLElement>('shelf'),
   keep: $<HTMLButtonElement>('keepBtn'),
   play: $<HTMLButtonElement>('playBtn'),
   editBtn: $<HTMLButtonElement>('editBtn'),
@@ -67,6 +66,8 @@ let deck: Deck | null = null;
 let busy = false;
 let cancelBusy: AbortController | null = null;
 let shelf: SceneSpec[] = store.shelf.get();
+/** The dots under the panel: built-ins, then kept dreams. Live from boot(). */
+let home: HomeHandle | null = null;
 let conjuring: Dream | null = null;
 /** What is playing, including anything worn on the keys. */
 let scene: Scene | null = null;
@@ -130,7 +131,8 @@ async function show(next: Scene, { fade = true }: { fade?: boolean } = {}): Prom
   paintMeta();
   labelKeys(next);
   store.last.set(flatten(next));
-  paintShelf();
+  home?.sync();
+  syncKeepButton();
   syncEditAvailability();
 }
 
@@ -267,63 +269,32 @@ async function summon(idea: string, { remix = false } = {}): Promise<void> {
   }
 }
 
-// --- shelf -----------------------------------------------------------------
+// --- kept dreams -----------------------------------------------------------
 
-function paintShelf(): void {
-  const entries: { spec: SceneSpec; builtin: boolean }[] = [
-    ...STARTERS.map((spec) => ({ spec, builtin: true })),
-    ...shelf.map((spec) => ({ spec, builtin: false })),
-  ];
-  const playing = scene?.dream.field;
+/** Every dream the dots hold: the built-ins that shipped, then yours. */
+const allDreams = (): SceneSpec[] => [...STARTERS, ...shelf];
 
-  ui.shelf.replaceChildren(
-    ...entries.map(({ spec, builtin }) => {
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = `card${spec.field === playing ? ' on' : ''}`;
-      card.title = spec.layout ? `${spec.layout.name} — ${spec.layout.purpose}` : spec.vibe;
+const keptSpec = (): SceneSpec | undefined => {
+  const field = scene?.dream.field;
+  return field === undefined ? undefined : shelf.find((s) => s.field === field);
+};
 
-      const swatch = document.createElement('span');
-      swatch.className = 'swatch';
-      // A hand-edited or otherwise malformed stored palette must not crash
-      // the shelf; load() repairs the same gap with PALETTE_FALLBACK, so
-      // mirror that here instead of throwing (and losing the kept dream).
-      const palette = Array.isArray(spec.palette) ? spec.palette : PALETTE_FALLBACK;
-      for (const c of palette.slice(0, 4)) {
-        const i = document.createElement('i');
-        i.style.background = c;
-        swatch.append(i);
-      }
-      card.append(swatch, document.createTextNode(spec.layout ? spec.layout.name : spec.name));
-      if (spec.layout) {
-        const tag = document.createElement('i');
-        tag.className = 'tag';
-        tag.textContent = 'keys';
-        card.append(tag);
-      }
-
-      if (!builtin) {
-        const x = document.createElement('button');
-        x.type = 'button';
-        x.className = 'x';
-        x.textContent = '×';
-        x.title = 'Forget this dream';
-        x.addEventListener('click', (e) => {
-          e.stopPropagation();
-          shelf = shelf.filter((s) => s !== spec);
-          store.shelf.set(shelf);
-          paintShelf();
-        });
-        card.append(x);
-      }
-
-      card.addEventListener('click', () => void playSpec(spec));
-      return card;
-    }),
-  );
+/** Keep is a toggle, so the same button that saves a dream also forgets it. */
+function syncKeepButton(): void {
+  const builtin = !!scene && STARTERS.some((s) => s.field === scene!.dream.field);
+  const kept = !!keptSpec();
+  // Left enabled when built-in: a disabled button gets no hover and no click,
+  // so it could not explain itself. toggleKeep() says why instead.
+  ui.keep.classList.toggle('on', kept);
+  ui.keep.textContent = kept ? 'Kept ✓' : 'Keep';
+  ui.keep.title = builtin
+    ? 'Built in — it is already one of the dots above'
+    : kept
+      ? 'Forget this dream and drop its dot'
+      : 'Add this dream to the dots above';
 }
 
-/** Loads and plays a shelf/built-in/gallery spec, exactly like pressing its card. */
+/** Loads and plays a dream from the dots, exactly like pressing its dot. */
 async function playSpec(spec: SceneSpec): Promise<void> {
   try {
     await show(await load(spec));
@@ -333,18 +304,24 @@ async function playSpec(spec: SceneSpec): Promise<void> {
   }
 }
 
-function keep(): void {
+function toggleKeep(): void {
   if (!scene) return;
-  const spec = flatten(scene);
   const name = scene.layout?.name ?? scene.dream.name;
-  if (shelf.some((s) => s.field === spec.field) || STARTERS.some((s) => s.field === spec.field)) {
-    say(`${name} is already on the shelf.`);
+  if (STARTERS.some((s) => s.field === scene!.dream.field)) {
+    say(`${name} is built in — it is already one of the dots above.`);
     return;
   }
-  shelf = [spec, ...shelf];
+  const existing = keptSpec();
+  if (existing) {
+    shelf = shelf.filter((s) => s !== existing);
+    say(`Forgot ${name}.`);
+  } else {
+    shelf = [...shelf, flatten(scene)];
+    say(`Kept ${name} — it is the last dot under the panel.`);
+  }
   store.shelf.set(shelf);
-  paintShelf();
-  say(`Kept ${name}.`);
+  home?.sync();
+  syncKeepButton();
 }
 
 // --- device ----------------------------------------------------------------
@@ -514,7 +491,7 @@ ui.composer.addEventListener('submit', (e) => {
   void summon(ui.prompt.value);
 });
 ui.remix.addEventListener('click', () => void summon(ui.prompt.value || 'take it somewhere new', { remix: true }));
-ui.keep.addEventListener('click', keep);
+ui.keep.addEventListener('click', toggleKeep);
 ui.deckBtn.addEventListener('click', () => void toggleDeck());
 function openSettings(): void {
   ui.apiKey.value = store.apiKey.get();
@@ -583,24 +560,14 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && editMode) setEditMode(false);
 });
 
+// ⌘⏎ remixes from anywhere. Plain ⏎ conjures via the composer's own submit,
+// so it needs no handler here — and nothing else is bound, which keeps Space,
+// / and r doing what the browser says they do.
 document.addEventListener('keydown', (e) => {
-  const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
-  if (e.key === '/' && !typing) {
-    e.preventDefault();
-    ui.prompt.focus();
-  } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-    e.preventDefault();
-    void summon(ui.prompt.value || 'take it somewhere new', { remix: true });
-  } else if (e.key.toLowerCase() === 's' && (e.metaKey || e.ctrlKey)) {
-    e.preventDefault();
-    keep();
-  } else if (e.code === 'Space' && !typing) {
-    e.preventDefault();
-    ui.play.click();
-  } else if (e.key === 'r' && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
-    e.preventDefault();
-    replayLanding();
-  }
+  if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+  if (document.querySelector('dialog[open]')) return;
+  e.preventDefault();
+  void summon(ui.prompt.value || 'take it somewhere new', { remix: true });
 });
 
 function paintSeeds(): void {
@@ -634,7 +601,6 @@ async function boot(): Promise<void> {
   engine.start();
 
   paintSeeds();
-  paintShelf();
   paintDeckButton();
   paintLandingControls();
 
@@ -645,15 +611,17 @@ async function boot(): Promise<void> {
   else if (!deck) say(store.apiKey.get() ? 'Describe a dream, or press a key to ripple it.' : 'Add a Gemini API key in Settings to start dreaming.');
   else say(`${deck.info.name} reconnected. Press a key.`);
 
-  const home = initHome({
-    examples: STARTERS,
+  home = initHome({
+    dreams: allDreams,
+    builtinCount: () => STARTERS.length,
     loadExample: (spec) => void playSpec(spec),
     openSettings,
     hasApiKey: () => !!store.apiKey.get(),
+    playingField: () => scene?.dream.field,
   });
   // Adding a key and closing Settings should skip the rest of the pitch,
   // same as a returning visitor who already had one.
-  ui.settingsDlg.addEventListener('close', () => home.refresh());
+  ui.settingsDlg.addEventListener('close', () => home?.refresh());
 }
 
 void boot().catch((err) => say(err instanceof Error ? err.message : 'failed to start', 'bad'));
