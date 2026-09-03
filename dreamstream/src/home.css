@@ -1,0 +1,42 @@
+/* The entry experience: see home.ts. Uses the app's own tokens (--c1..
+   --ink --line --muted --text --mono) from style.css. */
+
+#homeIntro { width: min(880px, 100% - 2.5rem); }
+
+.homeHero { text-align: center; padding-top: .6rem; }
+.homeHero h1 {
+  margin: 0 0 .5rem;
+  font-size: clamp(1.7rem, 4.4vw, 2.5rem);
+  font-weight: 650;
+  letter-spacing: -.025em;
+}
+.homeHero p { margin: 0 auto; max-width: 46ch; color: var(--muted); font-size: .92rem; line-height: 1.55; }
+
+.homeDots { display: flex; justify-content: center; gap: .5rem; margin-top: -.6rem; }
+.homeDot {
+  width: 9px; height: 9px; border-radius: 50%; padding: 0; border: 0;
+  background: #ffffff2a;
+  transition: background .2s, transform .16s var(--spring);
+}
+.homeDot:hover { background: #ffffff4a; }
+.homeDot.on { background: var(--c1); transform: scale(1.25); }
+
+.homeReveal { display: block; margin: .2rem auto 0; }
+.homeKeyLine { text-align: center; margin: .5rem 0 0; font-size: .8rem; color: var(--faint); }
+
+/* Before "Describe your own": the pitch is the panel, nothing else. */
+body:not(.homeRevealed) #composer,
+body:not(.homeRevealed) #status,
+body:not(.homeRevealed) #seeds,
+body:not(.homeRevealed) .knobs,
+body:not(.homeRevealed) #shelf {
+  display: none;
+}
+/* After: this is just dreamstream, same as it ever was. */
+body.homeRevealed .homeReveal,
+body.homeRevealed .homeDots {
+  display: none;
+}
+/* Scoped via the sibling combinator (not a bare .stage rule) so this always
+   wins over style.css's margin-top regardless of stylesheet load order. */
+#homeIntro ~ .stage { margin-top: .8rem; }

@@ -8,6 +8,7 @@ import { store, DEFAULT_MODEL, type Knobs, type Reminder } from './store';
 import { BLANK } from './icons';
 import { openKeyEditor, closeKeyEditor, type KeyPatch } from './keyEditor';
 import { LANDINGS, type LandingName } from './landing';
+import { initHome } from './home';
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
@@ -254,7 +255,7 @@ async function summon(idea: string, { remix = false } = {}): Promise<void> {
   const apiKey = store.apiKey.get();
   if (!apiKey) {
     say('Add a Gemini API key in Settings first.', 'bad');
-    ui.settingsDlg.showModal();
+    openSettings();
     return;
   }
 
@@ -345,17 +346,20 @@ function paintShelf(): void {
         card.append(x);
       }
 
-      card.addEventListener('click', async () => {
-        try {
-          await show(await load(spec));
-          say(spec.layout ? `${spec.layout.name} · ${spec.layout.purpose}` : `${spec.name} · ${spec.vibe}`);
-        } catch (err) {
-          say(err instanceof Error ? err.message : 'that dream will not load', 'bad');
-        }
-      });
+      card.addEventListener('click', () => void playSpec(spec));
       return card;
     }),
   );
+}
+
+/** Loads and plays a shelf/built-in/gallery spec, exactly like pressing its card. */
+async function playSpec(spec: SceneSpec): Promise<void> {
+  try {
+    await show(await load(spec));
+    say(spec.layout ? `${spec.layout.name} · ${spec.layout.purpose}` : `${spec.name} · ${spec.vibe}`);
+  } catch (err) {
+    say(err instanceof Error ? err.message : 'that dream will not load', 'bad');
+  }
 }
 
 function keep(): void {
@@ -698,11 +702,12 @@ ui.composer.addEventListener('submit', (e) => {
 ui.remix.addEventListener('click', () => void summon(ui.prompt.value || 'take it somewhere new', { remix: true }));
 ui.keep.addEventListener('click', keep);
 ui.deckBtn.addEventListener('click', () => void toggleDeck());
-$('settingsBtn').addEventListener('click', () => {
+function openSettings(): void {
   ui.apiKey.value = store.apiKey.get();
   ui.model.value = store.model.get();
   ui.settingsDlg.showModal();
-});
+}
+$('settingsBtn').addEventListener('click', openSettings);
 $('contractBtn').addEventListener('click', openContract);
 ui.reminderBtn.addEventListener('click', () => {
   paintReminderControls();
@@ -843,6 +848,16 @@ async function boot(): Promise<void> {
   if (!Deck.supported) say('This browser has no WebHID — the preview works, the hardware will not.');
   else if (!deck) say(store.apiKey.get() ? 'Describe a dream, or press a key to ripple it.' : 'Add a Gemini API key in Settings to start dreaming.');
   else say(`${deck.info.name} reconnected. Press a key.`);
+
+  const home = initHome({
+    examples: STARTERS,
+    loadExample: (spec) => void playSpec(spec),
+    openSettings,
+    hasApiKey: () => !!store.apiKey.get(),
+  });
+  // Adding a key and closing Settings should skip the rest of the pitch,
+  // same as a returning visitor who already had one.
+  ui.settingsDlg.addEventListener('close', () => home.refresh());
 }
 
 void boot().catch((err) => say(err instanceof Error ? err.message : 'failed to start', 'bad'));
