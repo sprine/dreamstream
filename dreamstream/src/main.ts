@@ -67,8 +67,8 @@ let conjuring: Dream | null = null;
 /** What is playing, including anything worn on the keys. */
 let scene: Scene | null = null;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-/** Reduce Motion picks the default; a choice made here outranks it, since the Cauldron is the point. */
-let landing: LandingName = store.landing.get() ?? (reducedMotion.matches ? 'crossfade' : 'cauldron');
+/** The Cauldron is the default, Reduce Motion or not; the Landing panel says so and offers the quiet way out. */
+let landing: LandingName = store.landing.get() ?? 'cauldron';
 
 const engine = new Engine({
   mount: ui.keys,
@@ -440,7 +440,7 @@ function paintLandingControls(): void {
   }
   ui.landingNote.className = 'err quiet';
   ui.landingNote.textContent =
-    blocked || (reducedMotion.matches ? 'Reduce Motion is on in your system settings, so Crossfade is the default. Choosing the Cauldron here is respected.' : '');
+    blocked || (reducedMotion.matches && cauldronOn() ? 'Reduce Motion is on in your system settings. Pick Crossfade if the Cauldron is too much.' : '');
   ui.replayLanding.disabled = !cauldronOn();
 }
 

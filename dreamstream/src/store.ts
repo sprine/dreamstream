@@ -74,7 +74,7 @@ export const store = {
     get: () => read<DreamSpec | null>('last', null),
     set: (v: DreamSpec | null) => write('last', v),
   },
-  /** How a new dream arrives on the panel. Null until chosen, so the system's motion preference can pick the default. */
+  /** How a new dream arrives on the panel. Null until chosen, which means the Cauldron. */
   landing: {
     get: (): LandingName | null => {
       const v = read<unknown>('landing', null);
