@@ -62,6 +62,7 @@ body {
 .bar {
   width: min(880px, 100% - 2.5rem);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: .5rem;
   padding: 1.4rem 0 .5rem;

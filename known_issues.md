@@ -42,13 +42,6 @@ burning the two repair attempts.
 Fix: map `candidates[0].finishReason` before the empty-text check, with a
 specific message per reason.
 
-### 5. Header overflows on phones and hides the Settings gear
-`src/style.css:62-68`. No `flex-wrap` and no media query anywhere. Seven chips
-in a 375 px bar; `body { overflow-x: hidden }` clips the last one, which is the
-gear — the only way to enter an API key. WebHID is desktop-only but the page
-loads and the preview works on phones.
-Fix: `.bar { flex-wrap: wrap }`.
-
 ### 6. Daily-quota 429 is reported as "wait a moment"
 `src/gemini.ts:111`. The free tier's daily quota also returns 429 with
 `RESOURCE_EXHAUSTED`; the message tells the user to retry shortly.
