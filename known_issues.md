@@ -47,15 +47,6 @@ specific message per reason.
 `RESOURCE_EXHAUSTED`; the message tells the user to retry shortly.
 Fix: inspect `error.message` for "quota" / "per day" and say so.
 
-### 8. A stored scene with no palette kills boot
-`src/main.ts:301-312`. `paintShelf` reads `spec.palette.slice` and
-`spec.layout.name` from localStorage without `validate()`. A missing `palette`
-throws inside `show()` → `boot()` rejects → the app is dead until storage is
-cleared. Reachable today only by hand-editing storage; reachable by anyone the
-moment a shelf can be imported.
-Fix: run stored specs through `validate`/`validateLayout` (or at least check
-shape and HEX) before painting, per card, in a try/catch.
-
 ## P2 — cheap hardening worth doing now
 
 ### 9. No Content-Security-Policy
@@ -70,8 +61,12 @@ https://generativelanguage.googleapis.com; img-src 'self' data:; style-src
 
 ### 10. Palette CSS is set from storage without the HEX check
 `src/main.ts:301-312`, `.swatch i.style.background = c`. Validated palettes are
-HEX-checked in `contract.ts:263`, but the shelf paints raw stored values, and
-`url(https://…)` in a background is a referrer/IP beacon. Same fix as 8.
+HEX-checked in `contract.ts:263`, but the shelf paints raw stored values (fixed
+the old item 8's crash for a missing/non-array palette, but not this: an array
+that parses fine can still hold a non-HEX string), and `url(https://…)` in a
+background is a referrer/IP beacon.
+Fix: filter each entry through the same `HEX` test as `validate()` before
+building the swatch.
 
 ### 11. Probe is evadable by conditions outside the sweep
 `src/contract.ts:88, 186-209`. Only `while`/`do` are denied. A field such as

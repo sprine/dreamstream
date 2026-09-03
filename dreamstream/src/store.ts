@@ -59,7 +59,12 @@ export const store = {
   },
   /** Dreams the user chose to keep, newest first. */
   shelf: {
-    get: () => read<DreamSpec[]>('shelf', []),
+    get: () => {
+      const v = read<unknown[]>('shelf', []);
+      // A corrupt or hand-edited array can still hold a null/non-object
+      // element; every reader downstream assumes a DreamSpec-shaped object.
+      return Array.isArray(v) ? (v.filter((s) => !!s && typeof s === 'object') as DreamSpec[]) : [];
+    },
     set: (v: DreamSpec[]) => write('shelf', v.slice(0, 60)),
   },
   /** The dream that was on screen when the tab closed. */

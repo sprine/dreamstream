@@ -1,4 +1,4 @@
-import { validate, serialise, compile, FIELD_DOC, CONTRACT_VERSION, type Dream } from './contract';
+import { validate, serialise, compile, FIELD_DOC, CONTRACT_VERSION, PALETTE_FALLBACK, type Dream } from './contract';
 import { renderKeys, validateLayout, type Scene, type SceneSpec } from './layout';
 import { IDLE, CONJURING, STARTERS, SEEDS } from './dreams';
 import { conjure, listFlashModels } from './gemini';
@@ -313,7 +313,11 @@ function paintShelf(): void {
 
       const swatch = document.createElement('span');
       swatch.className = 'swatch';
-      for (const c of spec.palette.slice(0, 4)) {
+      // A hand-edited or otherwise malformed stored palette must not crash
+      // the shelf; load() repairs the same gap with PALETTE_FALLBACK, so
+      // mirror that here instead of throwing (and losing the kept dream).
+      const palette = Array.isArray(spec.palette) ? spec.palette : PALETTE_FALLBACK;
+      for (const c of palette.slice(0, 4)) {
         const i = document.createElement('i');
         i.style.background = c;
         swatch.append(i);
