@@ -74,7 +74,10 @@ export const store = {
   },
   /** How a new dream arrives on the panel. Null until chosen, so the system's motion preference can pick the default. */
   landing: {
-    get: () => read<LandingName | null>('landing', null),
+    get: (): LandingName | null => {
+      const v = read<unknown>('landing', null);
+      return v === 'cauldron' || v === 'crossfade' ? v : null; // anything else falls back to the motion-preference default
+    },
     set: (v: LandingName) => write('landing', v),
   },
 };
