@@ -18,7 +18,6 @@
     <button id="deckBtn" class="chip" type="button">
       <span class="dot" id="deckDot"></span><span id="deckLabel">Connect deck</span>
     </button>
-    <button id="reminderBtn" class="chip" type="button">Reminder</button>
     <button id="landingBtn" class="chip" type="button" title="How a new dream arrives on the panel">Landing</button>
     <button id="contractBtn" class="chip" type="button">Contract</button>
     <button id="editBtn" class="chip" type="button" disabled>Edit keys</button>
@@ -100,29 +99,6 @@
         <button id="forgetKey" type="button" class="ghost danger">Forget key</button>
         <div class="grow"></div>
         <button class="go" value="close">Done</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="reminderDlg" class="sheet">
-    <form id="reminderForm">
-      <h2>Reminder</h2>
-      <p class="lede" id="reminderLede">Set one, and the panel will pulse as it counts down.</p>
-      <label class="field">
-        <span>for</span>
-        <input id="reminderFor" type="text" placeholder="25m, 90s, 2w…" autocomplete="off" spellcheck="false" />
-        <small>Seconds to weeks — write it as e.g. <code>90s</code>, <code>25m</code>, <code>3h</code>, <code>2w</code>.</small>
-      </label>
-      <label class="field">
-        <span>label</span>
-        <input id="reminderLabel" type="text" placeholder="tea, focus block…" maxlength="60" autocomplete="off" />
-      </label>
-      <p class="err" id="reminderErr"></p>
-      <div class="row">
-        <button id="reminderCancel" type="button" class="ghost danger" hidden>Cancel reminder</button>
-        <div class="grow"></div>
-        <button id="reminderStart" type="submit" class="go">Start</button>
-        <button id="reminderClose" type="button" class="ghost">Close</button>
       </div>
     </form>
   </dialog>
