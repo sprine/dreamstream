@@ -115,9 +115,14 @@ setInterval(() => {
   paintMeta();
 }, 1000);
 
-/** Serialisable form: a dream, plus a layout when it is wearing one. */
+/**
+ * Serialisable form: a dream, plus a layout when it is wearing one. The layout
+ * is copied, not referenced — a kept dream has to be a snapshot, or editing a
+ * key would silently rewrite the entry it was kept as and there would be
+ * nothing left to compare against.
+ */
 const flatten = (s: Scene): SceneSpec =>
-  s.layout ? { ...serialise(s.dream), layout: s.layout } : serialise(s.dream);
+  s.layout ? { ...serialise(s.dream), layout: structuredClone(s.layout) } : serialise(s.dream);
 
 async function show(next: Scene, { fade = true }: { fade?: boolean } = {}): Promise<void> {
   closeKeyEditor();
@@ -138,10 +143,13 @@ async function show(next: Scene, { fade = true }: { fade?: boolean } = {}): Prom
 
 /**
  * Editing lives on the right-click, which nothing about a key advertises —
- * so the panel says so on hover, and the status line says so once, when a
- * scene that actually has keys arrives.
+ * so the status line says so once when a scene with keys arrives, and every
+ * key repeats it on hover. It has to be on the key itself: a `title` on the
+ * panel is shadowed by the per-key ones `labelKeys` sets, so it would show
+ * everywhere except over the keys it is about.
  */
 const EDIT_HINT = 'Right-click a key to edit its icon, label and glyph.';
+const EDIT_HINT_SHORT = 'right-click to edit';
 
 function syncEditAvailability(): void {
   if (scene?.layout) ui.shell.title = EDIT_HINT;
@@ -160,6 +168,9 @@ async function refreshLayoutRender(): Promise<void> {
   engine.setOverlays(overlays);
   labelKeys(target);
   store.last.set(flatten(target));
+  // An edit can put a kept dream out of step with its dot, so Keep has to
+  // become Save the moment the key changes, not on the next scene change.
+  syncKeepButton();
 }
 
 function applyKeyPatch(index: number, patch: KeyPatch): void {
@@ -180,12 +191,15 @@ function clearKey(index: number): void {
   closeKeyEditor();
 }
 
-/** Hovering a key should say what it is for; the glyph alone cannot. */
+/** Hovering a key should say what it is for, and that you can change it. */
 function labelKeys({ layout }: Scene): void {
   [...ui.keys.children].forEach((el, i) => {
     const key = layout?.keys[i];
     const text = key && key.icon !== 'blank' ? [key.label, key.note].filter(Boolean).join(' — ') || key.icon : '';
-    if (text) el.setAttribute('title', text);
+    // Every key of an editable layout carries the hint, blank ones included —
+    // a blank key is the one you are most likely to want to fill in.
+    const title = layout ? [text, EDIT_HINT_SHORT].filter(Boolean).join(' · ') : text;
+    if (title) el.setAttribute('title', title);
     else el.removeAttribute('title');
   });
 }
@@ -276,19 +290,31 @@ const keptSpec = (): SceneSpec | undefined => {
   return field === undefined ? undefined : shelf.find((s) => s.field === field);
 };
 
-/** Keep is a toggle, so the same button that saves a dream also forgets it. */
+/**
+ * Keep is a toggle — but only for a dream that is stored exactly as it is
+ * playing. Edit the keys of one you already kept and the button becomes Save,
+ * because pressing "forget" is not what anyone means by that gesture.
+ */
+function keepState(): 'builtin' | 'new' | 'kept' | 'edited' {
+  if (!scene) return 'new';
+  if (STARTERS.some((s) => s.field === scene!.dream.field)) return 'builtin';
+  const existing = keptSpec();
+  if (!existing) return 'new';
+  return JSON.stringify(existing) === JSON.stringify(flatten(scene)) ? 'kept' : 'edited';
+}
+
 function syncKeepButton(): void {
-  const builtin = !!scene && STARTERS.some((s) => s.field === scene!.dream.field);
-  const kept = !!keptSpec();
+  const state = keepState();
   // Left enabled when built-in: a disabled button gets no hover and no click,
   // so it could not explain itself. toggleKeep() says why instead.
-  ui.keep.classList.toggle('on', kept);
-  ui.keep.textContent = kept ? 'Kept ✓' : 'Keep';
-  ui.keep.title = builtin
-    ? 'Built in — it is already one of the dots above'
-    : kept
-      ? 'Forget this dream and drop its dot'
-      : 'Add this dream to the dots above';
+  ui.keep.classList.toggle('on', state === 'kept' || state === 'edited');
+  ui.keep.textContent = state === 'kept' ? 'Kept ✓' : state === 'edited' ? 'Save' : 'Keep';
+  ui.keep.title = {
+    builtin: 'Built in — it is already one of the dots above',
+    new: 'Add this dream to the dots above',
+    kept: 'Forget this dream and drop its dot',
+    edited: 'Save your edits over the version on its dot',
+  }[state];
 }
 
 /** Loads and plays a dream from the dots, exactly like pressing its dot. */
@@ -304,19 +330,25 @@ async function playSpec(spec: SceneSpec): Promise<void> {
 function toggleKeep(): void {
   if (!scene) return;
   const name = scene.layout?.name ?? scene.dream.name;
-  if (STARTERS.some((s) => s.field === scene!.dream.field)) {
+  const state = keepState();
+  if (state === 'builtin') {
     say(`${name} is built in — it is already one of the dots above.`);
     return;
   }
   const existing = keptSpec();
-  if (existing) {
+  if (state === 'edited' && existing) {
+    // Key edits live on `scene.layout` and were only ever written to `last`.
+    // Without this they could never reach the dot they came from.
+    shelf = shelf.map((s) => (s === existing ? flatten(scene!) : s));
+    say(`Saved your edits to ${name}.`);
+  } else if (existing) {
     shelf = shelf.filter((s) => s !== existing);
     say(`Forgot ${name}.`);
   } else {
     shelf = [...shelf, flatten(scene)];
     say(`Kept ${name} — it is the last dot under the panel.`);
   }
-  store.shelf.set(shelf);
+  shelf = store.shelf.set(shelf);
   home?.sync();
   syncKeepButton();
 }
@@ -544,7 +576,9 @@ function keyAt(e: Event): { target: HTMLElement; index: number } | null {
 
 // Pressing a preview key ripples it, exactly as pressing the real one does.
 ui.keys.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return; // the right button edits; it must not also ripple
+  // The right button edits, and on macOS so does ctrl+click — which arrives
+  // as button 0. Neither may also ripple.
+  if (e.button !== 0 || e.ctrlKey) return;
   const hit = keyAt(e);
   if (!hit) return;
   engine.ripple(hit.index % engine.grid.cols, Math.floor(hit.index / engine.grid.cols));
@@ -555,12 +589,14 @@ ui.keys.addEventListener('pointerdown', (e) => {
 ui.keys.addEventListener('contextmenu', (e) => {
   const hit = keyAt(e);
   if (!hit) return;
-  e.preventDefault();
   const key = scene?.layout?.keys[hit.index];
   if (!key) {
+    // No editor to offer, so Chrome's own menu is left alone rather than
+    // swallowed for nothing; the status line explains why there is none.
     say('These keys are pure animation. Ask for an app or a set of controls to get keys you can edit.');
     return;
   }
+  e.preventDefault();
   openKeyEditor(hit.target, hit.index, key, {
     onChange: (patch) => applyKeyPatch(hit.index, patch),
     onClear: () => clearKey(hit.index),

@@ -21,7 +21,7 @@
 }
 .homeDot:hover { background: #ffffff4a; }
 .homeDot.on { background: var(--c1); transform: scale(1.25); }
-/* A dream you kept, so the row reads as "four that shipped, then yours". */
+/* A dream you kept, so the row reads as "the ones that shipped, then yours". */
 .homeDot.kept { background: none; border-color: #ffffff4a; }
 .homeDot.kept:hover { border-color: #ffffff7a; }
 .homeDot.kept.on { background: var(--c1); border-color: var(--c1); }

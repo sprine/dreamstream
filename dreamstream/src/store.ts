@@ -50,7 +50,7 @@ export const store = {
     get: () => ({ ...DEFAULT_KNOBS, ...read<Partial<Knobs>>('knobs', {}) }),
     set: (v: Knobs) => write('knobs', v),
   },
-  /** Dreams the user chose to keep, newest first. */
+  /** Dreams the user chose to keep, oldest first — the order of the dots. */
   shelf: {
     get: () => {
       const v = read<unknown[]>('shelf', []);
@@ -58,7 +58,16 @@ export const store = {
       // element; every reader downstream assumes a DreamSpec-shaped object.
       return Array.isArray(v) ? (v.filter((s) => !!s && typeof s === 'object') as DreamSpec[]) : [];
     },
-    set: (v: DreamSpec[]) => write('shelf', v.slice(0, 60)),
+    /**
+     * Capped at the tail: the dots run oldest-first, so an overflow has to
+     * evict the oldest, not silently drop the one just kept. Returns what
+     * was actually stored, so the caller's copy cannot drift past the cap.
+     */
+    set: (v: DreamSpec[]): DreamSpec[] => {
+      const capped = v.slice(-60);
+      write('shelf', capped);
+      return capped;
+    },
   },
   /** The dream that was on screen when the tab closed. */
   last: {

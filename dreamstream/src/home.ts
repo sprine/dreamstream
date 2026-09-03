@@ -70,6 +70,9 @@ export function initHome(hooks: HomeHooks): HomeHandle {
   document.querySelector('.stage')?.after(dots, reveal, keyLine);
 
   let timer = 0;
+  /** The dot autoplay last asked for — not the one that landed, so a dream
+      that fails to load is stepped past rather than retried forever. */
+  let index = -1;
 
   /** Where the playing dream sits in the row, or -1 when it is something just conjured. */
   const playingIndex = (): number => {
@@ -81,23 +84,33 @@ export function initHome(hooks: HomeHooks): HomeHandle {
     const list = hooks.dreams();
     const builtins = hooks.builtinCount();
     const on = playingIndex();
-    dots.replaceChildren(
-      ...list.map((spec, i) => {
-        const d = document.createElement('button');
-        d.type = 'button';
-        d.className = `homeDot${i >= builtins ? ' kept' : ''}${i === on ? ' on' : ''}`;
-        const name = spec.layout ? spec.layout.name : spec.name;
-        d.title = i >= builtins ? `${name} — kept` : name;
-        d.setAttribute('aria-label', d.title);
-        d.addEventListener('click', () => jumpTo(i));
-        return d;
-      }),
-    );
+    // Every landing calls this, which while autoplaying is every 5.2s. Rebuilding
+    // the row would drop a keyboard user's focus and restart the .on transition
+    // from a fresh element, so the buttons are only replaced when the row
+    // actually changes length.
+    if (dots.childElementCount !== list.length) {
+      dots.replaceChildren(
+        ...list.map((_, i) => {
+          const d = document.createElement('button');
+          d.type = 'button';
+          d.addEventListener('click', () => jumpTo(i));
+          return d;
+        }),
+      );
+    }
+    list.forEach((spec, i) => {
+      const d = dots.children[i] as HTMLButtonElement;
+      d.className = `homeDot${i >= builtins ? ' kept' : ''}${i === on ? ' on' : ''}`;
+      const name = spec.layout ? spec.layout.name : spec.name;
+      d.title = i >= builtins ? `${name} — kept` : name;
+      d.setAttribute('aria-label', d.title);
+    });
   };
 
   const jumpTo = (i: number): void => {
     const spec = hooks.dreams()[i];
     if (!spec) return;
+    index = i;
     hooks.loadExample(spec);
     rearm();
   };
@@ -107,7 +120,7 @@ export function initHome(hooks: HomeHooks): HomeHandle {
     if (document.body.classList.contains('homeRevealed')) return;
     timer = window.setTimeout(() => {
       const list = hooks.dreams();
-      jumpTo(list.length ? (playingIndex() + 1) % list.length : 0);
+      if (list.length) jumpTo((index + 1) % list.length);
     }, CYCLE_MS);
   };
 
