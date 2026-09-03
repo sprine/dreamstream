@@ -3,9 +3,9 @@ import type { KeySpec } from './layout';
 
 /**
  * A floating, non-modal editor for one key: pick an icon by clicking it
- * rather than describing it, type a label, tint it, clear it. Edit mode
- * (main.ts) decides when a key click opens this instead of rippling; this
- * module only knows how to draw and position itself.
+ * rather than describing it, type a label, tint it, clear it. main.ts opens
+ * it on a right-click over a key; this module only knows how to draw and
+ * position itself.
  *
  * `null` in a patch means "clear this field" — distinct from the field being
  * absent, which means "untouched".
@@ -175,7 +175,10 @@ function ensure(): HTMLDivElement {
   document.addEventListener('pointerdown', (e) => {
     if (p.hidden) return;
     const t = e.target as Element;
-    if (p.contains(t) || t.closest?.('.key')) return;
+    // Only the popup itself keeps it open: a press on another key now
+    // ripples that key rather than retargeting the editor, so leaving it
+    // open would point its fields at a key you are no longer editing.
+    if (p.contains(t)) return;
     closeKeyEditor();
   }, true);
 

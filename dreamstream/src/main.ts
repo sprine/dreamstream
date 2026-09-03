@@ -18,6 +18,7 @@ const $ = <T extends HTMLElement>(id: string): T => {
 
 const ui = {
   keys: $<HTMLDivElement>('keys'),
+  shell: document.querySelector<HTMLDivElement>('.shell')!,
   name: $<HTMLHeadingElement>('dreamName'),
   vibe: $<HTMLParagraphElement>('dreamVibe'),
   meta: $<HTMLParagraphElement>('dreamMeta'),
@@ -29,7 +30,6 @@ const ui = {
   seeds: $<HTMLDivElement>('seeds'),
   keep: $<HTMLButtonElement>('keepBtn'),
   play: $<HTMLButtonElement>('playBtn'),
-  editBtn: $<HTMLButtonElement>('editBtn'),
   deckBtn: $<HTMLButtonElement>('deckBtn'),
   deckDot: $<HTMLSpanElement>('deckDot'),
   deckLabel: $<HTMLSpanElement>('deckLabel'),
@@ -71,8 +71,6 @@ let home: HomeHandle | null = null;
 let conjuring: Dream | null = null;
 /** What is playing, including anything worn on the keys. */
 let scene: Scene | null = null;
-/** Clicking a key opens its editor instead of rippling it. */
-let editMode = false;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 /** Reduce Motion picks the default; a choice made here outranks it, since the Cauldron is the point. */
 let landing: LandingName = store.landing.get() ?? (reducedMotion.matches ? 'crossfade' : 'cauldron');
@@ -138,20 +136,19 @@ async function show(next: Scene, { fade = true }: { fade?: boolean } = {}): Prom
 
 // --- key editing -------------------------------------------------------
 
-function syncEditAvailability(): void {
-  const has = !!scene?.layout;
-  ui.editBtn.disabled = !has;
-  ui.editBtn.title = has
-    ? 'Click a key to edit its icon, label and glyph'
-    : 'Ask for an app or a set of controls to get keys you can edit';
-  if (!has && editMode) setEditMode(false);
-}
+/**
+ * Editing lives on the right-click, which nothing about a key advertises —
+ * so the panel says so on hover, and the status line says so once, when a
+ * scene that actually has keys arrives.
+ */
+const EDIT_HINT = 'Right-click a key to edit its icon, label and glyph.';
 
-function setEditMode(on: boolean): void {
-  editMode = on;
-  ui.editBtn.classList.toggle('on', on);
-  ui.keys.classList.toggle('editing', on);
-  if (!on) closeKeyEditor();
+function syncEditAvailability(): void {
+  if (scene?.layout) ui.shell.title = EDIT_HINT;
+  else {
+    ui.shell.removeAttribute('title');
+    closeKeyEditor();
+  }
 }
 
 /** Re-rasterises whatever is worn and persists the edit, same as any other scene change. */
@@ -255,7 +252,7 @@ async function summon(idea: string, { remix = false } = {}): Promise<void> {
       signal: controller.signal,
     });
     await show(next);
-    say(next.layout ? `${next.layout.name} · ${next.layout.purpose}` : `${next.dream.name} · ${next.dream.vibe}`);
+    say(next.layout ? `${next.layout.name} · ${next.layout.purpose} · ${EDIT_HINT}` : `${next.dream.name} · ${next.dream.vibe}`);
     ui.prompt.value = '';
   } catch (err) {
     if (fallback) await show(fallback, { fade: false });
@@ -298,7 +295,7 @@ function syncKeepButton(): void {
 async function playSpec(spec: SceneSpec): Promise<void> {
   try {
     await show(await load(spec));
-    say(spec.layout ? `${spec.layout.name} · ${spec.layout.purpose}` : `${spec.name} · ${spec.vibe}`);
+    say(spec.layout ? `${spec.layout.name} · ${spec.layout.purpose} · ${EDIT_HINT}` : `${spec.name} · ${spec.vibe}`);
   } catch (err) {
     say(err instanceof Error ? err.message : 'that dream will not load', 'bad');
   }
@@ -514,7 +511,6 @@ ui.replayLanding.addEventListener('click', () => {
   replayLanding();
 });
 reducedMotion.addEventListener('change', paintLandingControls);
-ui.editBtn.addEventListener('click', () => setEditMode(!editMode));
 $('applyField').addEventListener('click', () => void applyField());
 $('copyDream').addEventListener('click', () => {
   if (!scene) return;
@@ -539,25 +535,40 @@ ui.play.addEventListener('click', () => {
 
 for (const slider of Object.values(ui.sliders)) slider.addEventListener('input', () => applyKnobs());
 
-// Clicking a preview key ripples exactly as pressing the real one does —
-// unless edit mode is on, in which case it opens that key's editor instead.
-ui.keys.addEventListener('pointerdown', (e) => {
+/** The key under an event, or null if the pointer was on the bezel. */
+function keyAt(e: Event): { target: HTMLElement; index: number } | null {
   const target = e.target as HTMLElement;
   const index = Number(target.dataset['index']);
-  if (!Number.isFinite(index)) return;
-  const key = editMode ? scene?.layout?.keys[index] : undefined;
-  if (key) {
-    openKeyEditor(target, index, key, {
-      onChange: (patch) => applyKeyPatch(index, patch),
-      onClear: () => clearKey(index),
-    });
+  return Number.isFinite(index) ? { target, index } : null;
+}
+
+// Pressing a preview key ripples it, exactly as pressing the real one does.
+ui.keys.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return; // the right button edits; it must not also ripple
+  const hit = keyAt(e);
+  if (!hit) return;
+  engine.ripple(hit.index % engine.grid.cols, Math.floor(hit.index / engine.grid.cols));
+});
+
+// Right-click edits that key — the same gesture that opens "properties"
+// everywhere else, so the panel stays a panel and not a mode.
+ui.keys.addEventListener('contextmenu', (e) => {
+  const hit = keyAt(e);
+  if (!hit) return;
+  e.preventDefault();
+  const key = scene?.layout?.keys[hit.index];
+  if (!key) {
+    say('These keys are pure animation. Ask for an app or a set of controls to get keys you can edit.');
     return;
   }
-  engine.ripple(index % engine.grid.cols, Math.floor(index / engine.grid.cols));
+  openKeyEditor(hit.target, hit.index, key, {
+    onChange: (patch) => applyKeyPatch(hit.index, patch),
+    onClear: () => clearKey(hit.index),
+  });
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && editMode) setEditMode(false);
+  if (e.key === 'Escape') closeKeyEditor();
 });
 
 // ⌘⏎ remixes from anywhere. Plain ⏎ conjures via the composer's own submit,

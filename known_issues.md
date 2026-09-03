@@ -145,16 +145,15 @@ Fix: drop `supported`; treat a failed construction as unsupported
 
 ## P4 — UX polish, copy, accessibility
 
-### 22. Preview keys have no keyboard or assistive path
+### 22. Preview keys have no keyboard, touch or assistive path
 `src/engine.ts:199-204`, `index.html:31`. Keys are bare `<canvas>` elements
 inside `role="img"`, so they are invisible to assistive tech and untabbable;
-their notes are `title` only, invisible on touch.
-Fix: wrap each canvas in a `<button aria-label>` or add `tabindex` and a
-keydown → ripple path.
-
-### 24. Disabled "Edit keys" explains itself only through `title`
-`src/main.ts:168-171`. Disabled buttons do not get hover or focus in Chrome.
-Fix: keep it enabled and `say()` the hint on click.
+their notes are `title` only, invisible on touch. Since key editing moved onto
+the right-click there is no other way in, so a keyboard or touch user cannot
+reach the editor at all — the Edit keys toggle used to be their route.
+Fix: wrap each canvas in a `<button aria-label>` with `tabindex` and a
+keydown → ripple path, and open the editor from a long-press and from the
+context-menu key (`keydown` `ContextMenu`, or Shift+F10).
 
 ### 25. Reduced-motion coverage is partial
 `src/style.css:543-546` stops the aura and dot but leaves `rise`, `pop`,

@@ -29,7 +29,9 @@ ripple outward through whatever is playing.
 Describe an **application** — *a presentation remote*, *a deck for reviewing
 pull requests*, *a DJ rig* — and you also get a Layout: real icons on the keys,
 grouped and labelled, over a deliberately dimmed animation so the glyphs stay
-readable.
+readable. Right-click any key to change its icon, label, note or accent, or to
+clear it — editing is a gesture on the key itself rather than a mode you enter
+and leave.
 
 ### The icons are chosen, not drawn
 
