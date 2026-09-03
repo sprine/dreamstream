@@ -64,6 +64,22 @@ you switch to another app the tab goes hidden and `requestAnimationFrame`
 stops — so the render loop moves onto a worker-driven clock and the panel keeps
 animating, which is the entire reason a Stream Deck sits on a desk.
 
+## The landing
+
+A new dream does not just appear. By default it arrives through the
+**Cauldron**: the keys you have crouch, hop and juggle over a brew that swirls
+them into itself, coals smouldering beneath and smoke rising; then they burn
+away at the edges and the new layout falls flat like a heavy tile, in a cloud
+of dust that settles. While Gemini is thinking the panel simply keeps
+stirring, and the answer lands when it comes.
+
+It is one WebGL2 fragment shader (`src/landing.ts`) fed two pictures — the
+panel as it was and the panel as it is becoming — and it plays on the hardware
+exactly as it does on screen. Press `r` to land what is playing again, or open
+**Landing** in the header to switch to a plain crossfade. If your system has
+Reduce Motion on, the crossfade is the default; choosing the Cauldron there is
+still respected.
+
 ## The contracts
 
 Two, and they compose: a **Dream** is the animation, a **Layout** is what is
@@ -87,6 +103,7 @@ real. Copy JSON gives you the whole scene, icons included.
 | `⌘⏎` | remix what is playing |
 | `⌘S` | keep it on the shelf |
 | `space` | pause |
+| `r` | land it again |
 
 ## Layout
 
@@ -98,6 +115,7 @@ src/dreams.ts     built-ins and prompt seeds; held to the same contracts
 src/gemini.ts     structured-output request, error mapping, repair loop
 src/deck.ts       WebHID: one panel image for animations, per-key writes for glyphs
 src/engine.ts     one field evaluation per frame, feeding preview and hardware
+src/landing.ts    the Cauldron: a WebGL2 shader between the panel as it was and as it is becoming
 src/store.ts      localStorage: key, model, shelf, knobs
 src/main.ts       wiring
 scripts/          regenerates src/icons.json from lucide-static

@@ -19,6 +19,7 @@
       <span class="dot" id="deckDot"></span><span id="deckLabel">Connect deck</span>
     </button>
     <button id="reminderBtn" class="chip" type="button">Reminder</button>
+    <button id="landingBtn" class="chip" type="button" title="How a new dream arrives on the panel">Landing</button>
     <button id="contractBtn" class="chip" type="button">Contract</button>
     <button id="editBtn" class="chip" type="button" disabled>Edit keys</button>
     <button id="settingsBtn" class="chip icon" type="button" aria-label="Settings">⚙</button>
@@ -75,6 +76,7 @@
     <span><kbd>⌘⏎</kbd>remix</span>
     <span><kbd>⌘S</kbd>keep</span>
     <span><kbd>space</kbd>pause</span>
+    <span><kbd>r</kbd>land again</span>
   </footer>
 
   <dialog id="settingsDlg" class="sheet">
@@ -119,6 +121,29 @@
         <div class="grow"></div>
         <button id="reminderStart" type="submit" class="go">Start</button>
         <button id="reminderClose" type="button" class="ghost">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="landingDlg" class="sheet">
+    <form method="dialog">
+      <h2>Landing</h2>
+      <p class="lede">How a new dream arrives on the panel. The Cauldron is drawn on the GPU — WebGL2 — and plays on the hardware as well as here.</p>
+      <div class="options" id="landingOptions" role="radiogroup" aria-label="Landing">
+        <button type="button" class="option" role="radio" data-landing="cauldron">
+          <b>Cauldron</b>
+          <span>The keys you have crouch, hop and juggle over a swirling brew, coals smouldering beneath, then burn away at the edges. The new ones fall flat like a heavy tile, in a cloud of dust that settles.</span>
+        </button>
+        <button type="button" class="option" role="radio" data-landing="crossfade">
+          <b>Crossfade</b>
+          <span>A quiet dissolve, under a second.</span>
+        </button>
+      </div>
+      <p class="err" id="landingNote"></p>
+      <div class="row">
+        <button id="replayLanding" type="button" class="ghost">Land this one again</button>
+        <div class="grow"></div>
+        <button class="go" value="close">Done</button>
       </div>
     </form>
   </dialog>

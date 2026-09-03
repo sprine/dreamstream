@@ -1,6 +1,7 @@
 import type { Dream, FieldKey } from './contract';
 import type { Deck, KeyPainter } from './deck';
 import { invalidateSamples } from './deck';
+import { Cauldron, LANDING_KEY_PX, RELEASE_SECONDS, STIR_SECONDS } from './landing';
 
 /**
  * The renderer. Once per frame it evaluates the active field into one small
@@ -93,6 +94,17 @@ interface Ripple {
   born: number;
 }
 
+/** A landing in progress: the shader, the two palettes it blends between, and where it is in time. */
+interface Landing {
+  fx: Cauldron;
+  paletteFrom: readonly string[];
+  paletteTo: readonly string[];
+  /** Wall time the stir began. */
+  started: number;
+  /** Wall time the stir is (or will be) released. Null while held for a conjure in flight. */
+  released: number | null;
+}
+
 export class Engine {
   #mount: HTMLElement;
   #onFieldError: EngineOptions['onFieldError'];
@@ -110,6 +122,13 @@ export class Engine {
   #cells: { ctx: CanvasRenderingContext2D; sx: number; sy: number }[] = [];
   /** One transparent glyph layer per key, or empty when nothing is worn. */
   #overlays: (HTMLCanvasElement | null)[] = [];
+
+  /** The whole panel — animation and glyphs — at landing resolution. Only drawn while a landing needs it. */
+  #full = document.createElement('canvas');
+  #fullCtx: CanvasRenderingContext2D;
+  #landing: Landing | null = null;
+  /** Built once, on the first landing; null after a failed attempt so it is not retried every frame. */
+  #fx: Cauldron | null | undefined;
 
   #current: Dream | null = null;
   #previous: Dream | null = null;
@@ -141,6 +160,9 @@ export class Engine {
     const ctx = this.#low.getContext('2d', { willReadFrequently: true });
     if (!ctx) throw new Error('canvas 2d context unavailable');
     this.#lowCtx = ctx;
+    const fullCtx = this.#full.getContext('2d');
+    if (!fullCtx) throw new Error('canvas 2d context unavailable');
+    this.#fullCtx = fullCtx;
     this.setGrid(5, 3);
     document.addEventListener('visibilitychange', this.#retime);
   }
@@ -156,6 +178,9 @@ export class Engine {
     this.#image = this.#lowCtx.createImageData(this.#low.width, this.#low.height);
     this.#smooth = new Float32Array(this.#low.width * this.#low.height * 3);
     this.#primed = false;
+    this.#full.width = cols * LANDING_KEY_PX;
+    this.#full.height = rows * LANDING_KEY_PX;
+    this.#landing = null; // a picture of the old grid cannot land on the new one
 
     const keys = cols * rows;
     this.#rnd = new Float32Array(keys);
@@ -209,14 +234,112 @@ export class Engine {
     this.#paused = v;
   }
 
-  /** Swaps in a dream. The old one keeps rendering underneath until the fade completes. */
-  play(dream: Dream, { fade = true }: { fade?: boolean } = {}): void {
+  /**
+   * Swaps in a dream. With `landing`, the panel as it is now is handed to the
+   * Cauldron and the new dream arrives through it — or, if a brew is already
+   * being held for it, the brew is released. Otherwise the old dream keeps
+   * rendering underneath until the cross-fade completes, or is cut if `fade`
+   * is off. Any landing in progress is cancelled by a play that does not ask
+   * for one: what is asked for is what shows.
+   */
+  play(dream: Dream, { fade = true, landing = false }: { fade?: boolean; landing?: boolean } = {}): void {
+    const landed = landing ? this.#land(dream.palette) : this.#cancelLanding();
     if (dream === this.#current) return;
-    this.#previous = fade ? this.#current : null;
+    this.#previous = fade && !landed ? this.#current : null;
     this.#current = dream;
     this.#fade = fade && this.#previous ? 0 : 1;
     this.#prevClock = this.#clock;
     this.#clock = 0;
+  }
+
+  /**
+   * Starts the Cauldron and holds it in the stir — the panel keeps brewing
+   * for as long as a conjure takes — until a `play` with `landing` releases
+   * it, or one without cancels it. Returns false when there is nothing to
+   * stir yet or no GPU to stir it with.
+   */
+  brew(): boolean {
+    if (this.#landing) return true;
+    return this.#begin(null, this.#current?.palette ?? []);
+  }
+
+  /** Runs the landing again, from what is playing to itself. For watching it. */
+  replay(): boolean {
+    return this.#land(this.#current?.palette ?? []);
+  }
+
+  get landing(): boolean {
+    return this.#landing !== null;
+  }
+
+  static get landingSupported(): boolean {
+    return Cauldron.supported;
+  }
+
+  /** Releases a held brew, or begins a full landing. True if one is now running. */
+  #land(paletteTo: readonly string[]): boolean {
+    const L = this.#landing;
+    if (L) {
+      L.paletteTo = paletteTo;
+      L.released ??= this.#wall;
+      return true;
+    }
+    return this.#begin(this.#wall + STIR_SECONDS, paletteTo);
+  }
+
+  #begin(released: number | null, paletteTo: readonly string[]): boolean {
+    const dream = this.#current;
+    if (!dream || !this.#primed) return false;
+    const fx = this.#cauldron();
+    if (!fx) return false;
+    fx.begin(this.#composite(), this.#cols, this.#rows);
+    this.#landing = { fx, paletteFrom: dream.palette, paletteTo, started: this.#wall, released };
+    return true;
+  }
+
+  /** Always false, so `play` can use it as the "no landing" branch. */
+  #cancelLanding(): false {
+    this.#landing = null;
+    return false;
+  }
+
+  #cauldron(): Cauldron | null {
+    if (this.#fx?.lost) this.#fx = undefined;
+    if (this.#fx === undefined) {
+      try {
+        this.#fx = Cauldron.supported ? new Cauldron() : null;
+      } catch (err) {
+        console.warn('landing disabled:', err);
+        this.#fx = null;
+      }
+    }
+    return this.#fx;
+  }
+
+  /** The panel as the preview shows it, one picture: the field scaled up, glyphs on top. */
+  #composite(): HTMLCanvasElement {
+    const ctx = this.#fullCtx;
+    const P = LANDING_KEY_PX;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(this.#low, 0, 0, this.#full.width, this.#full.height);
+    this.#overlays.forEach((glyph, i) => {
+      if (glyph) ctx.drawImage(glyph, (i % this.#cols) * P, ((i / this.#cols) | 0) * P, P, P);
+    });
+    return this.#full;
+  }
+
+  /** One frame of the landing, or the end of it. Called after the field has been evaluated. */
+  #renderLanding(): void {
+    const L = this.#landing;
+    if (!L) return;
+    const stir = this.#wall - L.started;
+    const release = L.released === null ? -1 : this.#wall - L.released;
+    if (release >= RELEASE_SECONDS || L.fx.lost) {
+      this.#landing = null;
+      return;
+    }
+    L.fx.render(this.#composite(), stir, release, L.paletteFrom, L.paletteTo);
   }
 
   setKnobs(k: Knobs): void {
@@ -242,6 +365,13 @@ export class Engine {
     const row = (index / this.#cols) | 0;
     ctx.clearRect(0, 0, w, h);
     ctx.imageSmoothingEnabled = true;
+    // Mid-landing the shader has already composed animation and glyphs; the key is a window onto it.
+    const L = this.#landing;
+    if (L) {
+      const P = LANDING_KEY_PX;
+      ctx.drawImage(L.fx.canvas, col * P, row * P, P, P, 0, 0, w, h);
+      return;
+    }
     ctx.drawImage(this.#low, col * S, row * S, S, S, 0, 0, w, h);
 
     const glyph = this.#overlays[index];
@@ -313,7 +443,7 @@ export class Engine {
 
       if (this.#deck?.alive) {
         invalidateSamples();
-        await this.#deck.paint(this.#low, this.#overlays.length ? this.#paintKey : null);
+        await this.#deck.paint(this.#low, this.#overlays.length || this.#landing ? this.#paintKey : null);
       }
       await this.#ticker.next();
     }
@@ -363,6 +493,7 @@ export class Engine {
     }
 
     this.#lowCtx.putImageData(this.#image, 0, 0);
+    this.#renderLanding();
     // Skipping the preview only saves work when the loop is running for a deck;
     // with no deck a hidden tab has already parked, so the first frame should land.
     if (document.hidden && this.#deck) return;

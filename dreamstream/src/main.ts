@@ -7,6 +7,7 @@ import { Engine } from './engine';
 import { store, DEFAULT_MODEL, type Knobs, type Reminder } from './store';
 import { BLANK } from './icons';
 import { openKeyEditor, closeKeyEditor, type KeyPatch } from './keyEditor';
+import { LANDINGS, type LandingName } from './landing';
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
@@ -44,6 +45,11 @@ const ui = {
   reminderStart: $<HTMLButtonElement>('reminderStart'),
   reminderCancel: $<HTMLButtonElement>('reminderCancel'),
   reminderClose: $<HTMLButtonElement>('reminderClose'),
+  landingBtn: $<HTMLButtonElement>('landingBtn'),
+  landingDlg: $<HTMLDialogElement>('landingDlg'),
+  landingOptions: $<HTMLDivElement>('landingOptions'),
+  landingNote: $<HTMLParagraphElement>('landingNote'),
+  replayLanding: $<HTMLButtonElement>('replayLanding'),
   apiKey: $<HTMLInputElement>('apiKey'),
   model: $<HTMLInputElement>('model'),
   modelList: $<HTMLDataListElement>('modelList'),
@@ -75,6 +81,9 @@ let scene: Scene | null = null;
 /** Clicking a key opens its editor instead of rippling it. */
 let editMode = false;
 let reminder: Reminder | null = store.reminder.get();
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+/** Reduce Motion picks the default; a choice made here outranks it, since the Cauldron is the point. */
+let landing: LandingName = store.landing.get() ?? (reducedMotion.matches ? 'crossfade' : 'cauldron');
 /** Quarter-marks already rippled, so a reload mid-countdown does not replay them. */
 const reminderMarks = new Set<number>();
 /** Fraction-of-time-remaining marks that ripple the panel on the way down. Zero itself fires the reminder. */
@@ -138,10 +147,11 @@ setInterval(() => {
 const flatten = (s: Scene): SceneSpec =>
   s.layout ? { ...serialise(s.dream), layout: s.layout } : serialise(s.dream);
 
-async function show(next: Scene, opts: { fade?: boolean } = {}): Promise<void> {
+async function show(next: Scene, { fade = true }: { fade?: boolean } = {}): Promise<void> {
   closeKeyEditor();
   scene = next;
-  engine.play(next.dream, opts);
+  // A fade is a scene *arriving*; a cut is a re-fit or an edit, and those do not land.
+  engine.play(next.dream, { fade, landing: fade && cauldronOn() });
   engine.setOverlays(next.layout ? await renderKeys(next.layout) : []);
   wear(next);
   paintMeta();
@@ -252,7 +262,10 @@ async function summon(idea: string, { remix = false } = {}): Promise<void> {
   ui.conjure.disabled = true;
   ui.remix.disabled = true;
   say(remix ? 'Reworking it' : 'Dreaming', 'busy');
-  if (conjuring) engine.play(conjuring); // the hardware itself becomes the progress indicator
+  // The hardware itself becomes the progress indicator: the cauldron starts
+  // stirring and holds there until the answer lands — or, without it, the
+  // conjuring beam sweeps the panel.
+  if (!(cauldronOn() && engine.brew()) && conjuring) engine.play(conjuring);
 
   try {
     const basis = remix ? fallback : undefined;
@@ -578,6 +591,42 @@ function paintReminderControls(): void {
   }
 }
 
+// --- landing ---------------------------------------------------------------
+
+/** Why the Cauldron cannot run here, or empty when it can. */
+function cauldronBlocked(): string {
+  return Engine.landingSupported ? '' : 'This browser has no WebGL2, so dreams crossfade instead.';
+}
+
+const cauldronOn = (): boolean => landing === 'cauldron' && !cauldronBlocked();
+
+function paintLandingControls(): void {
+  const blocked = cauldronBlocked();
+  ui.landingBtn.textContent = LANDINGS[cauldronOn() ? 'cauldron' : 'crossfade'].title;
+  ui.landingBtn.classList.toggle('on', cauldronOn());
+  for (const el of ui.landingOptions.querySelectorAll<HTMLButtonElement>('.option')) {
+    const name = el.dataset['landing'] as LandingName;
+    el.setAttribute('aria-checked', String(name === landing));
+    el.disabled = name === 'cauldron' && !!blocked;
+  }
+  ui.landingNote.className = 'err quiet';
+  ui.landingNote.textContent =
+    blocked || (reducedMotion.matches ? 'Reduce Motion is on in your system settings, so Crossfade is the default. Choosing the Cauldron here is respected.' : '');
+  ui.replayLanding.disabled = !cauldronOn();
+}
+
+function setLanding(name: LandingName): void {
+  landing = name;
+  store.landing.set(name);
+  paintLandingControls();
+}
+
+/** Lands what is playing again, on itself. The way to watch it without waiting for a dream. */
+function replayLanding(): void {
+  if (!cauldronOn()) return;
+  if (engine.replay()) say(`${scene?.layout?.name ?? scene?.dream.name ?? 'It'} lands again.`);
+}
+
 // --- contract panel --------------------------------------------------------
 
 function openContract(): void {
@@ -652,6 +701,20 @@ ui.reminderForm.addEventListener('submit', (e) => {
 });
 ui.reminderCancel.addEventListener('click', cancelReminder);
 ui.reminderClose.addEventListener('click', () => ui.reminderDlg.close());
+ui.landingBtn.addEventListener('click', () => {
+  paintLandingControls();
+  ui.landingDlg.showModal();
+});
+ui.landingOptions.addEventListener('click', (e) => {
+  const option = (e.target as HTMLElement).closest<HTMLButtonElement>('.option');
+  const name = option?.dataset['landing'];
+  if (name === 'cauldron' || name === 'crossfade') setLanding(name);
+});
+ui.replayLanding.addEventListener('click', () => {
+  ui.landingDlg.close();
+  replayLanding();
+});
+reducedMotion.addEventListener('change', paintLandingControls);
 ui.editBtn.addEventListener('click', () => setEditMode(!editMode));
 $('applyField').addEventListener('click', () => void applyField());
 $('copyDream').addEventListener('click', () => {
@@ -712,6 +775,9 @@ document.addEventListener('keydown', (e) => {
   } else if (e.code === 'Space' && !typing) {
     e.preventDefault();
     ui.play.click();
+  } else if (e.key === 'r' && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    replayLanding();
   }
 });
 
@@ -748,6 +814,7 @@ async function boot(): Promise<void> {
   paintSeeds();
   paintShelf();
   paintDeckButton();
+  paintLandingControls();
 
   // A reminder that finished while the tab was closed fires now, late rather than never.
   // (Quarter-marks for one still running were already backfilled synchronously at module load.)

@@ -1,4 +1,5 @@
 import type { DreamSpec } from './contract';
+import type { LandingName } from './landing';
 
 /**
  * Everything that survives a reload, and nothing else. All of it lives in
@@ -70,5 +71,10 @@ export const store = {
   reminder: {
     get: () => read<Reminder | null>('reminder', null),
     set: (v: Reminder | null) => write('reminder', v),
+  },
+  /** How a new dream arrives on the panel. Null until chosen, so the system's motion preference can pick the default. */
+  landing: {
+    get: () => read<LandingName | null>('landing', null),
+    set: (v: LandingName) => write('landing', v),
   },
 };
