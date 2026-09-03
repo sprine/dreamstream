@@ -54,12 +54,6 @@ Fix: `.bar { flex-wrap: wrap }`.
 `RESOURCE_EXHAUSTED`; the message tells the user to retry shortly.
 Fix: inspect `error.message` for "quota" / "per day" and say so.
 
-### 7. Model list offers models that reject the response schema
-`src/gemini.ts:236` keeps anything containing "flash": `*-flash-image`,
-`*-flash-preview-tts`, `*-flash-live*` all advertise `generateContent` but fail
-on `responseSchema`, so picking one from the list breaks every conjure.
-Fix: exclude `image|tts|live|native-audio`.
-
 ### 8. A stored scene with no palette kills boot
 `src/main.ts:301-312`. `paintShelf` reads `spec.palette.slice` and
 `spec.layout.name` from localStorage without `validate()`. A missing `palette`

@@ -259,6 +259,6 @@ export async function listFlashModels(apiKey: string): Promise<string[]> {
   return (data.models ?? [])
     .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
     .map((m) => (m.name ?? '').replace(/^models\//, ''))
-    .filter((n) => n.includes('flash') && !n.includes('embedding'))
+    .filter((n) => n.includes('flash') && !/embedding|image|tts|live|native-audio|thinking/.test(n))
     .sort();
 }
