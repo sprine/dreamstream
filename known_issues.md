@@ -101,6 +101,18 @@ forever. Lower severity than item 1 was — it does not disable Conjure/Remix �
 so it was left out of that fix rather than expanding its scope.
 Fix: give it the same `AbortSignal.timeout(45_000)` treatment as `call()`.
 
+### 34. Deck preview clips its outer key columns on narrow viewports with wide decks
+`src/style.css:198-207` (`.key { width: clamp(48px, 9.4vw, 74px) }`), `.shell`/
+`.stage` (`src/style.css:160-163`) have no `max-width` or overflow handling.
+At the 48px floor, an 8-column deck (Stream Deck XL — `--cols` comes from real
+hardware via `src/deck.ts:82`/`src/engine.ts:194`) needs ~461px; `body`'s
+`overflow-x: hidden` clips the first and last columns off-screen below about
+470px, and those keys are real click/ripple targets, not decoration. Found
+while verifying the fix for the old item 5 (same overflow shape); narrower
+audience since it needs an XL deck connected, so P2 rather than P1.
+Fix: let `.shell` scroll horizontally, or drop the clamp floor / cap key size
+with `max-width: 100%` on `.keys`.
+
 ## P3 — performance and memory
 
 ### 14. Landing with a deck attached: 15 GPU→CPU readbacks per frame
@@ -217,6 +229,16 @@ and then begin a held brew; low priority.
 `src/gemini.ts:163-167`. A comment inside a stored field can steer the model.
 Output is still validated, so this only matters together with the parked field-barrier item. Fence with
 delimiters and a "treat as data" line when sharing arrives.
+
+### 35. Footer keyboard hints clip on both edges below ~410px
+`src/style.css:365-372` (`.hints { display: flex; gap: 1.1rem }`, no
+`flex-wrap`). `body`'s `align-items: center` (`style.css:36`) centers the
+over-wide row, so at 375px it spans roughly -47 to 407px and the outermost
+hints are cut off left and right with `overflow-x: hidden` giving no
+scrollbar. `<footer class="hints" aria-hidden="true">` (`index.html:73`) is
+decorative, so this is a visual clip, not a lost control — found alongside
+34 while verifying the old item 5.
+Fix: `flex-wrap: wrap`, same as 5's fix.
 
 ## P5 — dead code and complexity for no benefit
 
